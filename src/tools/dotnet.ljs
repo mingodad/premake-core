@@ -1,0 +1,325 @@
+//
+// dotnet.ljs
+// Interface for the C# compilers, all of which are flag compatible.
+// Copyright (c) 2002-2013 Jason Perkins and the Premake project
+//
+
+
+	var p = premake;
+	p.tools.dotnet = {};
+	var dotnet = p.tools.dotnet;
+	var project = p.project;
+	var config = p.config;
+
+
+//
+// Examine the file and project configurations to glean additional
+// information about a source code in a C# project.
+//
+// @param fcfg
+//    The file configuration to consider.
+// @return
+//    A table containing the following keys:
+//
+//      action:     the build action for the file; one of "Compile", "Copy",
+//                  "EmbeddedResource", or "None".
+//      subtype:    an additional categorization of the file type, or nil if
+//                  no subtype is required.
+//      dependency: a related file name, (i.e. *.Designer.cs) if appropriate
+//                  for the file action and subtype.
+//
+
+	function dotnet.fileinfo(fcfg) {
+		var info = {};
+		if( (fcfg == null) ) {
+			return info;
+		}
+
+		var fname = fcfg.abspath;
+		var ext = path.getextension(fname)->lower();
+
+		// Determine the build action for the file, falling back to the file
+		// extension if no explicit action is available.
+
+		if( fcfg.buildaction == "Compile" || ext == ".cs" || ext == ".fs" ) {
+			info.action = "Compile";
+		} else if( fcfg.buildaction == "Embed" || ext == ".resx" ) {
+			info.action = "EmbeddedResource";
+		} else if( fcfg.buildaction == "Copy" || ext == ".asax" || ext == ".aspx" || ext == ".dll" || ext == ".tt" ) {
+			info.action = "Content";
+		} else if( fcfg.buildaction == "Resource" ) {
+			info.action = "Resource";
+		} else if( ext == ".xaml" ) {
+			if( fcfg.buildaction == "Application" || path.getbasename(fname) == "App" ) {
+				if( fcfg.project.kind == p.SHAREDLIB ) {
+					info.action = "None";
+				} else {
+					info.action = "ApplicationDefinition";
+				}
+			} else {
+				info.action = "Page";
+			}
+		} else {
+			info.action = "None";
+		}
+
+		// Try to work out any subtypes, based on the files in the project
+
+		if( info.action == "Compile" && fname->endswith(".cs") ) {
+
+			if( fname->endswith(".Designer.cs") ) {
+				var basename = fname->sub(1, -13);
+
+				// Look for associated files: .resx, .settings, .cs, .xsd
+				var testname = basename .. ".resx";
+				if( project.hasfile(fcfg.project, testname) ) {
+					info.AutoGen = "True";
+					info.DependentUpon = testname;
+				}
+
+				testname = basename .. ".settings";
+				if( project.hasfile(fcfg.project, testname) ) {
+					info.AutoGen = "True";
+					info.DependentUpon = testname;
+					info.DesignTimeSharedInput = "True";
+				}
+
+				testname = basename .. ".cs";
+				if( project.hasfile(fcfg.project, testname) ) {
+					info.AutoGen = null;
+					info.SubType = "Dependency";
+					info.DependentUpon = testname;
+				}
+
+				testname = basename .. ".xsd";
+				if( project.hasfile(fcfg.project, testname) ) {
+					info.AutoGen = "True";
+					info.DesignTime = "True";
+					info.DependentUpon = testname;
+				}
+
+			} else if( fname->endswith(".xaml.cs") ) {
+				info.SubType = "Code";
+				info.DependentUpon = fname->sub(1, -4);
+
+			} else {
+				var basename = fname->sub(1, -4);
+
+				// Is there a matching *.xsd?
+				testname = basename .. ".xsd";
+				if( project.hasfile(fcfg.project, testname) ) {
+					info.DependentUpon = testname;
+				}
+
+				// Is there a matching *.Designer.cs?
+				testname = basename .. ".Designer.cs";
+				if( project.hasfile(fcfg.project, testname) ) {
+					info.SubType = "Form";
+				}
+
+				testname = basename .. ".tt";
+				if( project.hasfile(fcfg.project, testname) ) {
+					info.AutoGen = "True";
+					info.DesignTime = "True";
+					info.DependentUpon = testname;
+				}
+
+			}
+
+			// Allow C# object type build actions to override the default
+			if( fcfg.buildaction == "Component" ||
+			   fcfg.buildaction == "Form" ||
+			   fcfg.buildaction == "UserControl"
+			) {
+				info.SubType = fcfg.buildaction;
+			}
+
+			// This flag is deprecated, will remove eventually
+			if( fcfg.flags && fcfg.flags.Component ) {
+				info.SubType = "Component";
+			}
+
+		}
+
+		if( info.action == "Content" ) {
+			info.CopyToOutputDirectory = "PreserveNewest";
+		}
+
+		if( info.action == "EmbeddedResource" && fname->endswith(".resx") ) {
+			var basename = fname->sub(1, -6);
+
+			// Is there a matching *.cs file?
+			var testname = basename .. ".cs";
+			if( project.hasfile(fcfg.project, testname) ) {
+				info.DependentUpon = testname;
+				if( project.hasfile(fcfg.project, basename .. ".Designer.cs") ) {
+					info.SubType = "DesignerType";
+				}
+			} else {
+				// Is there a matching *.Designer.cs?
+				testname = basename .. ".Designer.cs";
+				if( project.hasfile(fcfg.project, testname) ) {
+					info.SubType = "Designer";
+
+					var resourceAccessGenerator = "ResXFileCodeGenerator";
+					if( fcfg.project.resourcegenerator ) {
+						if( fcfg.project.resourcegenerator == "public" ) {
+							resourceAccessGenerator = "PublicResXFileCodeGenerator";
+						}
+					}
+
+					info.Generator = resourceAccessGenerator;
+					info.LastGenOutput = path.getname(testname);
+				}
+			}
+
+		}
+
+		if( info.action == "None" && fname->endswith(".settings") ) {
+			var testname = fname->sub(1, -10) .. ".Designer.cs";
+			if( project.hasfile(fcfg.project, testname) ) {
+				info.Generator = "SettingsSingleFileGenerator";
+				info.LastGenOutput = path.getname(testname);
+			}
+		}
+
+		if( info.action == "Content" && fname->endswith(".tt") ) {
+			var testname = fname->sub(1, -4) .. ".cs";
+			if( project.hasfile(fcfg.project, testname) ) {
+				info.Generator = "TextTemplatingFileGenerator";
+				info.LastGenOutput = path.getname(testname);
+				info.CopyToOutputDirectory = null;
+			}
+		}
+
+		if( info.action == "None" && fname->endswith(".xsd") ) {
+			var testname = fname->sub(1, -5) .. ".Designer.cs";
+			if( project.hasfile(fcfg.project, testname) ) {
+				info.SubType = "Designer";
+				info.Generator = "MSDataSetGenerator";
+				info.LastGenOutput = path.getname(testname);
+			}
+		}
+
+		if( info.action == "None" && (fname->endswith(".xsc") || fname->endswith(".xss")) ) {
+			var testname = fname->sub(1, -5) .. ".xsd";
+			if( project.hasfile(fcfg.project, testname) ) {
+				info.DependentUpon = testname;
+			}
+		}
+
+		if( fname->endswith(".xaml") ) {
+			var testname = fname .. ".cs";
+			if( project.hasfile(fcfg.project, testname) ) {
+				info.SubType = "Designer";
+				info.Generator = "MSBuild:Compile";
+			}
+		}
+
+		if( info.DependentUpon ) {
+			info.DependentUpon = path.getname(info.DependentUpon);
+		}
+
+		return info;
+	}
+
+
+
+//
+// Retrieves the executable command name for a tool, based on the
+// provided configuration and the operating environment.
+//
+// @param cfg
+//    The configuration to query.
+// @param tool
+//    The tool to fetch, one of "csc" for the C# compiler, or
+//    "resgen" for the resource compiler.
+// @return
+//    The executable command name for a tool, or nil if the system's
+//    default value should be used.
+//
+
+	function dotnet.gettoolname(cfg, tool) {
+		var compilers = {
+			msnet = "csc",
+			mono = "mcs",
+			pnet = "cscc",
+		};
+
+		if( tool == "csc" ) {
+			var toolset = _OPTIONS.dotnet || (os.istarget("windows") ? "msnet" : "mono");
+			return compilers[toolset];
+		} else {
+			return "resgen";
+		}
+	}
+
+
+
+//
+// Returns a list of compiler flags, based on the supplied configuration.
+//
+
+	dotnet.flags = {
+		clr = {
+			Unsafe = "/unsafe",
+		},
+		flags = {
+			FatalWarning = "/warnaserror",
+		},
+		optimize = {
+			On = "/optimize",
+			Size = "/optimize",
+			Speed = "/optimize",
+		},
+		symbols = {
+			On = "/debug",
+		}
+	};
+
+	function dotnet.getflags(cfg) {
+		var flags = config.mapFlags(cfg, dotnet.flags);
+
+		// Tells the compiler not to include the csc.rsp response file which
+		// it does by default and references all the assemblies shipped with
+		// the .NET Framework. VS sets this flag by default for C# projects.
+		table.insert(flags, '/noconfig');
+
+		if( cfg.project.icon ) {
+			var fn = project.getrelative(cfg.project, cfg.project.icon);
+			table.insert(flags, string.format('/win32icon:"%s"', fn));
+		}
+
+		if( #cfg.defines > 0 ) {
+			table.insert(flags, table.implode(cfg.defines, "/d:", "", " "));
+		}
+
+		return table.join(flags, cfg.buildoptions);
+	}
+
+
+
+//
+// Translates the Premake kind into the CSC kind string.
+//
+
+	function dotnet.getkind(cfg) {
+		if( (cfg.kind == "ConsoleApp") ) {
+			return "Exe";
+		} else if( (cfg.kind == "WindowedApp") ) {
+			return "WinExe";
+		} else if( (cfg.kind == "SharedLib") ) {
+			return "Library";
+		} else {
+			error("invalid dotnet kind " .. cfg.kind .. ". Valid kinds are ConsoleApp, WindowsApp, SharedLib");
+		}
+	}
+
+
+//
+// Returns makefile-specific configuration rules.
+//
+
+	function dotnet.getmakesettings(cfg) {
+		return null;
+	}

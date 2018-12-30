@@ -1,0 +1,11 @@
+function filter.cycle(lowlevel, context, extra) {
+  return function(chunk) {
+    var ret;
+    ret, context = lowlevel(context, chunk, extra);
+    return ret;
+  };
+}
+
+function normalize(marker) {
+  return filter.cycle(eol, 0, marker);
+}

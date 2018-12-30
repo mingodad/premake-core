@@ -1,0 +1,76 @@
+var p = premake;
+p.raw = { };
+var raw = p.raw;
+var gvisited = { };
+
+function raw.workspace(wks) {
+	if( ! gvisited[wks.global] ) {
+		gvisited[wks.global] = true;
+		raw.printTable({ global = wks.global });
+	}
+}
+
+function raw.printTable(t, i) {
+	i = i || 0;
+	placement = raw._createPlacement(t);
+	raw._printTableRecursive(t, i, placement);
+}
+
+function raw._printTableRecursive(t, i, placement) {
+	elements = { };
+	for( k, v in pairs(t) ) {
+		table.insert(elements, { key = k, value = v });
+	}
+
+	table.sort(elements, function(a, b) {
+		var n1 = type(a.key) == "number";
+		var n2 = type(b.key) == "number";
+		if( n1 != n2 ) {
+			return n1;
+		}
+
+		var k1 = n1 && a.key || raw._encode(a.key);
+		var k2 = n2 && b.key || raw._encode(b.key);
+		return k1 < k2;
+	});
+
+	for( _, elem in ipairs(elements) ) {
+		p = placement[elem.value];
+		if( p && elem.key == p.key && t == p.parent ) {
+			_p(i, "%s", raw._encode(elem.key) .. ': ' .. raw._encode(elem.value) .. ' {');
+			raw._printTableRecursive(elem.value, i + 1, placement);
+			_p(i, '} # ' .. raw._encode(elem.key));
+		} else {
+			_p(i, "%s", raw._encode(elem.key) .. ': ' .. raw._encode(elem.value));
+		}
+	}
+}
+
+function raw._createPlacement(tbl) {
+	placement = { };
+	placementList = { tbl };
+	while( #placementList != 0 ) {
+		parentList = { };
+		for( _, parent in ipairs(placementList) ) {
+			for( k, v in pairs(parent) ) {
+				if( type(v) == "table" && ! placement[v] ) {
+					table.insert(parentList, v);
+					placement[v] = {
+						parent = parent,
+						key = k
+					};
+				}
+			}
+		}
+		placementList = parentList;
+	}
+	return placement;
+}
+
+function raw._encode(v) {
+	if( type(v) == "string" ) {
+		return '"' .. v .. '"';
+	} else {
+		return tostring(v);
+	}
+}

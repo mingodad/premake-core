@@ -1,0 +1,41 @@
+//
+// tests/actions/vstudio/vc2010/test_language_targets.ljs
+// Check the import language targets block of a VS 2010 project.
+// Copyright (c) 2014 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("vs2010_language_targets");
+	var vc2010 = p.vstudio.vc2010;
+	var project = p.project;
+
+
+//
+// Setup
+//
+
+	var wks;
+
+	function suite.setup() {
+		p.action.set("vs2010");
+		rule ("MyRules");
+		rule ("MyOtherRules");
+		wks = test.createWorkspace();
+	}
+
+	var function prepare() {
+		var prj = test.getproject(wks);
+		vc2010.importLanguageTargets(prj);
+	}
+
+
+//
+// Writes language targets.
+//
+
+	function suite.structureIsCorrect() {
+		prepare();
+		test.capture ([=[
+<Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+		]=]);
+	}

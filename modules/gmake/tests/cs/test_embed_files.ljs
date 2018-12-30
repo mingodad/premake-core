@@ -1,0 +1,75 @@
+//
+// tests/actions/make/cs/test_embed_files.ljs
+// Tests embedded file listings for C# Makefiles.
+// Copyright (c) 2013-2014 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("make_cs_embed_files");
+	var make = p.make;
+	var cs = p.make.cs;
+	var project = p.project;
+
+
+//
+// Setup
+//
+
+	var wks, prj, cfg;
+
+	function suite.setup() {
+		wks = test.createWorkspace();
+	}
+
+	var function prepare() {
+		prj = p.workspace.getproject(wks, 1);
+		make.csEmbedFiles(prj, p.tools.dotnet);
+	}
+
+
+//
+// Files that can be compiled should be listed here.
+//
+
+	function suite.doesListResourceFiles() {
+		files ({ "Hello.resx" });
+		prepare();
+		test.capture ([=[
+EMBEDFILES += \
+	$(OBJDIR)/MyProject.Hello.resources \
+
+		]=]);
+	}
+
+
+//
+// Files that should not be compiled should be excluded.
+//
+
+	function suite.doesIgnoreNonResourceFiles() {
+		files ({ "About.txt", "Hello.resx" });
+		prepare();
+		test.capture ([=[
+EMBEDFILES += \
+	$(OBJDIR)/MyProject.Hello.resources \
+
+		]=]);
+	}
+
+
+//
+// Files with a non-standard file extension but a build action of
+// "Embed" should be listed here.
+//
+
+	function suite.doesIncludeCompileBuildAction() {
+		files ({ "Hello.txt" });
+		filter ("files:*.txt");
+		buildaction ("Embed");
+		prepare();
+		test.capture ([=[
+EMBEDFILES += \
+	Hello.txt \
+
+		]=]);
+	}

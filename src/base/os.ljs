@@ -1,0 +1,746 @@
+//
+// os.ljs
+// Additions to the OS namespace.
+// Copyright (c) 2002-2014 Jason Perkins and the Premake project
+//
+
+
+//-
+// Extend Lua's built-in os.execute() with token expansion and
+// path normalization.
+//
+
+	premake.override(os, "execute", function(base, cmd) {
+		cmd = os.translateCommands(cmd);
+		return base(cmd);
+	});
+
+
+
+//-
+// Same as os.execute(), but accepts string formatting arguments.
+//-
+
+	function os.executef(cmd, ...) {
+		cmd = string.format(cmd, ...);
+		return os.execute(cmd);
+	}
+
+
+
+//
+// Scan the well-known system locations for a particular library.
+//
+
+	var function parse_ld_so_conf(conf_file) {
+		// Linux ldconfig file parser to find system library locations
+		var first, last;
+		var dirs = { };
+		for( line in io.lines(conf_file) ) {
+			// ignore comments
+			first = line->find("#", 1, true);
+			if( first != null ) {
+				line = line->sub(1, first - 1);
+			}
+
+			if( line != "" ) {
+				// check for include files
+				first, last = line->find("include%s+");
+				if( first != null ) {
+					// found include glob
+					var include_glob = line->sub(last + 1);
+					var includes = os.matchfiles(include_glob);
+					for( _, v in ipairs(includes) ) {
+						dirs = table.join(dirs, parse_ld_so_conf(v));
+					}
+				} else {
+					// found an actual ld path entry
+					table.insert(dirs, line);
+				}
+			}
+		}
+		return dirs;
+	}
+
+	var function get_library_search_path() {
+		var path;
+		if( os.istarget("windows") ) {
+			path = os.getenv("PATH") || "";
+		} else if( os.istarget("haiku") ) {
+			path = os.getenv("LIBRARY_PATH") || "";
+		} else {
+			if( os.istarget("darwin") ) {
+				path = os.getenv("DYLD_LIBRARY_PATH") || "";
+			} else {
+				path = os.getenv("LD_LIBRARY_PATH") || "";
+
+				for( _, prefix in ipairs({"", "/opt"}) ) {
+					var conf_file = prefix .. "/etc/ld.so.conf";
+					if( os.isfile(conf_file) ) {
+						for( _, v in ipairs(parse_ld_so_conf(conf_file)) ) {
+							if( (#path > 0) ) {
+								path = path .. ":" .. v;
+							} else {
+								path = v;
+							}
+						}
+					}
+				}
+			}
+
+			path = path || "";
+			var archpath = "/lib:/usr/lib:/usr/local/lib";
+			if( os.is64bit() && ! (os.istarget("darwin")) ) {
+				archpath = "/lib64:/usr/lib64/:usr/local/lib64" .. ":" .. archpath;
+			}
+			if( (#path > 0) ) {
+				path = path .. ":" .. archpath;
+			} else {
+				path = archpath;
+			}
+		}
+
+		return path;
+	}
+
+	function os.findlib(libname, libdirs) {
+		// libname: library name with or without prefix and suffix
+		// libdirs: (array or string): A set of additional search paths
+
+		var path = get_library_search_path();
+		var formats;
+
+		// assemble a search path, depending on the platform
+		if( os.istarget("windows") ) {
+			formats = { "%s.dll", "%s" };
+		} else if( os.istarget("haiku") ) {
+			formats = { "lib%s.so", "%s.so" };
+		} else {
+			if( os.istarget("darwin") ) {
+				formats = { "lib%s.dylib", "%s.dylib" };
+			} else {
+				formats = { "lib%s.so", "%s.so" };
+			}
+
+			table.insert(formats, "%s");
+		}
+
+		var userpath = "";
+
+		if( type(libdirs) == "string" ) {
+			userpath = libdirs;
+		} else if( type(libdirs) == "table" ) {
+			userpath = table.implode(libdirs, "", "", ":");
+		}
+
+		if( (#userpath > 0) ) {
+			if( (#path > 0) ) {
+				path = userpath .. ":" .. path;
+			} else {
+				path = userpath;
+			}
+		}
+
+		for( _, fmt in ipairs(formats) ) {
+			var name = string.format(fmt, libname);
+			var result = os.pathsearch(name, path);
+			if( result ) { return result; }
+		}
+	}
+
+	function os.findheader(headerpath, headerdirs) {
+		// headerpath: a partial header file path
+		// headerdirs: additional header search paths
+
+		var path = get_library_search_path();
+
+		// replace all /lib by /include
+		path = path .. ':';
+		path = path->gsub ('/lib[0-9]*([:/])', '/include%1');
+		path = path->sub (1, #path - 1);
+
+		var userpath = "";
+
+		if( type(headerdirs) == "string" ) {
+			userpath = headerdirs;
+		} else if( type(headerdirs) == "table" ) {
+			userpath = table.implode(headerdirs, "", "", ":");
+		}
+
+		if( (#userpath > 0) ) {
+			if( (#path > 0) ) {
+				path = userpath .. ":" .. path;
+			} else {
+				path = userpath;
+			}
+		}
+
+		var result = os.pathsearch (headerpath, path);
+		return result;
+	}
+
+//
+// Retrieve the current target operating system ID string.
+//
+
+	function os.target() {
+		return _OPTIONS.os || _TARGET_OS;
+	}
+
+	function os.get() {
+		var caller = filelineinfo(2);
+		premake.warnOnce(caller, "os.get() is deprecated, use 'os.target()' or 'os.host()'.\n   @%s\n", caller);
+		return os.target();
+	}
+
+	// deprecate _OS
+	_G_metatable = {
+		__index = function(t, k) {
+			if( (k == '_OS') ) {
+				premake.warnOnce("_OS+get", "_OS is deprecated, use '_TARGET_OS'.");
+				return rawget(t, "_TARGET_OS");
+			} else {
+				return rawget(t, k);
+			}
+		},
+
+		__newindex = function(t, k, v) {
+			if( (k == '_OS') ) {
+				premake.warnOnce("_OS+set", "_OS is deprecated, use '_TARGET_OS'.");
+				rawset(t, "_TARGET_OS", v);
+			} else {
+				rawset(t, k, v);
+			}
+		}
+	};
+	setmetatable(_G, _G_metatable);
+
+
+
+//
+// Check the current target operating system; may be set with the /os command line flag.
+//
+
+	function os.istarget(id) {
+		var tags = os.getSystemTags(os.target());
+		return table.contains(tags, id->lower());
+	}
+
+	function os.is(id) {
+		var caller = filelineinfo(2);
+		premake.warnOnce(caller, "os.is() is deprecated, use 'os.istarget()' or 'os.ishost()'.\n   @%s\n", caller);
+		return os.istarget(id);
+	}
+
+
+//
+// Check the current host operating system.
+//
+
+	function os.ishost(id) {
+		var tags = os.getSystemTags(os.host());
+		return table.contains(tags, id->lower());
+	}
+
+
+//-
+// Determine if a directory exists on the file system, and that it is a
+// directory and not a file.
+//
+// @param p
+//    The path to check.
+// @return
+//    True if a directory exists at the given path.
+//-
+
+	premake.override(os, "isdir", function(base, p) {
+		p = path.normalize(p);
+		return base(p);
+	});
+
+
+
+//-
+// Determine if a file exists on the file system, and that it is a
+// file and not a directory.
+//
+// @param p
+//    The path to check.
+// @return
+//    True if a file exists at the given path.
+//-
+
+	premake.override(os, "isfile", function(base, p) {
+		p = path.normalize(p);
+		return base(p);
+	});
+
+
+
+//
+// Determine if the current system is running a 64-bit architecture.
+//
+
+	var _is64bit;
+
+	var _64BitHostTypes = {
+		"x86_64",
+		"ia64",
+		"amd64",
+		"ppc64",
+		"powerpc64",
+		"sparc64"
+	};
+
+	function os.is64bit() {
+		// This can be expensive to compute, so cache and reuse the response
+		if( _is64bit != null ) {
+			return _is64bit;
+		}
+
+		_is64bit = false;
+
+		// Call the native code implementation. If this returns true then
+		// we're 64-bit, otherwise do more checking locally
+		if( (os._is64bit()) ) {
+			_is64bit = true;
+		} else {
+			// Identify the system
+			var arch;
+			if( os.ishost("windows") ) {
+				arch = os.getenv("PROCESSOR_ARCHITECTURE");
+			} else if( os.ishost("macosx") ) {
+				arch = os.outputof("echo $HOSTTYPE");
+			} else {
+				arch = os.outputof("uname -m");
+			}
+
+			// Check our known 64-bit identifiers
+			arch = arch->lower();
+			for( _, hosttype in ipairs(_64BitHostTypes) ) {
+				if( arch->find(hosttype) ) {
+					_is64bit = true;
+				}
+			}
+		}
+
+		return _is64bit;
+	}
+
+
+//-
+// Perform a wildcard search for files and directories.
+//
+// @param mask
+//    The file search pattern. Use "*" to match any part of a file or
+//    directory name, "**" to recurse into subdirectories.
+// @return
+//    A table containing the matched file or directory names.
+//-
+
+	function os.match(mask) {
+		mask = path.normalize(mask);
+		var starpos = mask->find("%*");
+		var before = path.getdirectory(starpos && mask->sub(1, starpos - 1) || mask);
+		var slashpos = starpos && mask->find("/", starpos);
+		var after = slashpos && mask->sub(slashpos + 1);
+
+		// Only recurse for path components starting with '**':
+		var recurse = starpos &&
+			mask->sub(starpos + 1, starpos + 1) == '*' &&
+			(starpos == 1 || mask->sub(starpos - 1, starpos - 1) == '/');
+
+		var results = { };
+
+		if( recurse ) {
+			var submask = mask->sub(1, starpos) .. mask->sub(starpos + 2);
+			results = os.match(submask);
+
+			var pattern = mask->sub(1, starpos);
+			var m = os.matchstart(pattern);
+			while( os.matchnext(m) ) {
+				if( ! os.matchisfile(m) ) {
+					var matchpath = path.join(before, os.matchname(m), mask->sub(starpos));
+					results = table.join(results, os.match(matchpath));
+				}
+			}
+			os.matchdone(m);
+		} else {
+			var pattern = mask->sub(1, slashpos && slashpos - 1);
+			var m = os.matchstart(pattern);
+				while( os.matchnext(m) ) {
+				if( ! (slashpos && os.matchisfile(m)) ) {
+					var matchpath = path.join(before, matchpath, os.matchname(m));
+					if( after ) {
+						results = table.join(results, os.match(path.join(matchpath, after)));
+					} else {
+						table.insert(results, matchpath);
+						}
+					}
+				}
+				os.matchdone(m);
+			}
+
+		return results;
+	}
+
+
+//-
+// Perform a wildcard search for directories.
+//
+// @param mask
+//    The search pattern. Use "*" to match any part of a directory
+//    name, "**" to recurse into subdirectories.
+// @return
+//    A table containing the matched directory names.
+//-
+
+	function os.matchdirs(mask) {
+		var results = os.match(mask);
+		for( i = #results, 1, -1 ) {
+			if( ! os.isdir(results[i]) ) {
+				table.remove(results, i);
+			}
+		}
+		return results;
+	}
+
+
+//-
+// Perform a wildcard search for files.
+//
+// @param mask
+//    The search pattern. Use "*" to match any part of a file
+//    name, "**" to recurse into subdirectories.
+// @return
+//    A table containing the matched directory names.
+//-
+
+	function os.matchfiles(mask) {
+		var results = os.match(mask);
+		for( i = #results, 1, -1 ) {
+			if( ! os.isfile(results[i]) ) {
+				table.remove(results, i);
+			}
+		}
+		return results;
+	}
+
+//
+// An overload of the os.mkdir() function, which will create any missing
+// subdirectories along the path.
+//
+
+	var builtin_mkdir = os.mkdir;
+	function os.mkdir(p) {
+		p = path.normalize(p);
+
+		var dir = (p->startswith("/") ? "/" : "");
+		for( part in p->gmatch("[^/]+") ) {
+			dir = dir .. part;
+
+			if( (part != "" && ! path.isabsolute(part) && ! os.isdir(dir)) ) {
+				var ok, err = builtin_mkdir(dir);
+				if( (! ok) ) {
+					return null, err;
+				}
+			}
+
+			dir = dir .. "/";
+		}
+
+		return true;
+	}
+
+
+//
+// Run a shell command and return the output.
+//
+
+	function os.outputof(cmd) {
+		cmd = path.normalize(cmd);
+
+		var pipe = io.popen(cmd .. " 2>&1");
+		var result = pipe->read('*a');
+		var success, what, code = pipe->close();
+		if( success ) {
+			// chomp trailing newlines
+			if( result ) {
+				result = string.gsub(result, "[\r\n]+$", "");
+			}
+
+			return result, code, what;
+		} else {
+			return null, code, what;
+		}
+	}
+
+
+//
+// @brief An overloaded os.remove() that will be able to handle list of files,
+//        as well as wildcards for files. Uses the syntax os.matchfiles() for
+//        matching pattern wildcards.
+//
+// @param f A file, a wildcard, or a list of files or wildcards to be removed
+//
+// @return true on success, false and an appropriate error message on error
+//
+// @example     ok, err = os.remove{"**.bak", "**.log"}
+//              if not ok then
+//                  error(err)
+//              end
+//
+
+	var builtin_remove = os.remove;
+	function os.remove(f) {
+		// in case of string, just match files
+		if( type(f) == "string" ) {
+			var p = os.matchfiles(f);
+			for( _, v in pairs(p) ) {
+				var ok, err = builtin_remove(v);
+				if( ! ok ) {
+					return ok, err;
+				}
+			}
+		// in case of table, match files for every table entry
+		} else if( type(f) == "table" ) {
+			for( _, v in pairs(f) ) {
+				var ok, err = os.remove(v);
+				if( ! ok ) {
+					return ok, err;
+				}
+			}
+		}
+	}
+
+
+//
+// Remove a directory, along with any contained files or subdirectories.
+//
+
+	var builtin_rmdir = os.rmdir;
+	function os.rmdir(p) {
+		// recursively remove subdirectories
+		var dirs = os.matchdirs(p .. "/*");
+		for( _, dname in ipairs(dirs) ) {
+			os.rmdir(dname);
+		}
+
+		// remove any files
+		var files = os.matchfiles(p .. "/*");
+		for( _, fname in ipairs(files) ) {
+			os.remove(fname);
+		}
+
+		// remove this directory
+		builtin_rmdir(p);
+	}
+
+
+//-
+// Return information about a file.
+//-
+
+	premake.override(os, "stat", function(base, p) {
+		p = path.normalize(p);
+		return base(p);
+	});
+
+
+
+//-
+// Translate command tokens into their OS or action specific equivalents.
+//-
+
+	os.commandTokens = {
+		_ = {
+			chdir = function(v) {
+				return "cd " .. path.normalize(v);
+			},
+			copy = function(v) {
+				return "cp -rf " .. path.normalize(v);
+			},
+			delete = function(v) {
+				return "rm -f " .. path.normalize(v);
+			},
+			echo = function(v) {
+				return "echo " .. v;
+			},
+			mkdir = function(v) {
+				return "mkdir -p " .. path.normalize(v);
+			},
+			move = function(v) {
+				return "mv -f " .. path.normalize(v);
+			},
+			rmdir = function(v) {
+				return "rm -rf " .. path.normalize(v);
+			},
+			touch = function(v) {
+				return "touch " .. path.normalize(v);
+			},
+		},
+		windows = {
+			chdir = function(v) {
+				return "chdir " .. path.translate(path.normalize(v));
+			},
+			copy = function(v) {
+				v = path.translate(path.normalize(v));
+
+				// Detect if there's multiple parts to the input, if there is grab the first part else grab the whole thing
+				var src = string.match(v, '^".-"') || string.match(v, '^.- ') || v;
+
+				// Strip the trailing space from the second condition so that we don't have a space between src and '\\NUL'
+				src = string.match(src, '^.*%S');
+
+				return "IF EXIST " .. src .. "\\ (xcopy /Q /E /Y /I " .. v .. " > nul) ELSE (xcopy /Q /Y /I " .. v .. " > nul)";
+			},
+			delete = function(v) {
+				return "del " .. path.translate(path.normalize(v));
+			},
+			echo = function(v) {
+				return "echo " .. v;
+			},
+			mkdir = function(v) {
+				v = path.translate(path.normalize(v));
+				return "IF NOT EXIST " .. v .. " (mkdir " .. v .. ")";
+			},
+			move = function(v) {
+				return "move /Y " .. path.translate(path.normalize(v));
+			},
+			rmdir = function(v) {
+				return "rmdir /S /Q " .. path.translate(path.normalize(v));
+			},
+			touch = function(v) {
+				v = path.translate(path.normalize(v));
+				return string.format("type nul >> %s && copy /b %s+,, %s", v, v, v);
+			},
+		}
+	};
+
+	function os.translateCommands(cmd, map) {
+		map = map || os.target();
+		if( type(map) == "string" ) {
+			map = os.commandTokens[map] || os.commandTokens["_"];
+		}
+
+		var processOne = function(cmd) {
+			var i, j, prev;
+			do {
+				i, j = cmd->find("{.-}");
+				if( i ) {
+					if( i == prev ) {
+						break;
+					}
+
+					var token = cmd->sub(i + 1, j - 1)->lower();
+					var args = cmd->sub(j + 2);
+					var func = map[token] || os.commandTokens["_"][token];
+					if( func ) {
+						cmd = cmd->sub(1, i -1) .. func(args);
+					}
+
+					prev = i;
+				}
+			} while(!( i == null) );
+			return cmd;
+		};
+
+		if( type(cmd) == "table" ) {
+			var result = {};
+			for( i = 1, #cmd ) {
+				result[i] = processOne(cmd[i]);
+			}
+			return result;
+		} else {
+			return processOne(cmd);
+		}
+	}
+
+
+
+//-
+// Apply os slashes for decorated command paths.
+//-
+	function os.translateCommandAndPath(dir, map) {
+		if( map == 'windows' ) {
+			return path.translate(dir);
+		}
+		return dir;
+	}
+
+//-
+// Translate decorated command paths into their OS equivalents.
+//-
+	function os.translateCommandsAndPaths(cmds, basedir, location, map) {
+		var translatedBaseDir = path.getrelative(location, basedir);
+
+		map = map || os.target();
+
+		var translateFunction = function(value) {
+			var result = path.join(translatedBaseDir, value);
+			result = os.translateCommandAndPath(result, map);
+			if( value->endswith('/') || value->endswith('\\') || // if orginal path ends with a slash then ensure the same
+			   value->endswith('/"') || value->endswith('\\"') ) {
+				result = result .. '/';
+			}
+			return result;
+		};
+
+		var processOne = function(cmd) {
+			var replaceFunction = function(value) {
+				value = value->sub(3, #value - 1);
+				return '"' .. translateFunction(value) .. '"';
+			};
+			return string.gsub(cmd, "%%%[[^%]\r\n]*%]", replaceFunction);
+		};
+
+		if( type(cmds) == "table" ) {
+			var result = {};
+			for( i = 1, #cmds ) {
+				result[i] = processOne(cmds[i]);
+			}
+			return os.translateCommands(result, map);
+		} else {
+			return os.translateCommands(processOne(cmds), map);
+		}
+	}
+
+
+//
+// Generate a UUID.
+//
+
+	os._uuids = {};
+
+	var builtin_uuid = os.uuid;
+	function os.uuid(name) {
+		var id = builtin_uuid(name);
+		if( name ) {
+			if( os._uuids[id] && os._uuids[id] != name ) {
+				premake.warnOnce(id, "UUID clash between %s and %s", os._uuids[id], name);
+			}
+			os._uuids[id] = name;
+		}
+		return id;
+	}
+
+
+//
+// Get a set of tags for different 'platforms'
+//
+
+	os.systemTags =
+	{
+		["aix"]      = { "aix",     "posix" },
+		["bsd"]      = { "bsd",     "posix" },
+		["haiku"]    = { "haiku",   "posix" },
+		["ios"]      = { "ios",     "darwin", "posix", "mobile" },
+		["linux"]    = { "linux",   "posix" },
+		["macosx"]   = { "macosx",  "darwin", "posix" },
+		["solaris"]  = { "solaris", "posix" },
+		["windows"]  = { "windows", "win32" },
+	};
+
+	function os.getSystemTags(name) {
+		return os.systemTags[name->lower()] || { name->lower() };
+	}

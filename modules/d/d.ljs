@@ -1,0 +1,49 @@
+//
+// d/d.ljs
+// Define the D makefile action(s).
+// Copyright (c) 2013-2015 Andrew Gough, Manu Evans, and the Premake project
+//
+
+	var p = premake;
+
+	p.modules.d = {};
+
+	var m = p.modules.d;
+
+	m._VERSION = p._VERSION;
+	m.elements = {};
+
+	var api = p.api;
+
+
+//
+// Patch the project table to provide knowledge of D projects
+//
+	function p.project.isd(prj) {
+		return prj.language == p.D;
+	}
+
+//
+// Patch the path table to provide knowledge of D file extenstions
+//
+	function path.isdfile(fname) {
+		return path.hasextension(fname, { ".d" });
+	}
+
+	function path.isdheader(fname) {
+		return path.hasextension(fname, { ".di" });
+	}
+
+
+//
+// Patch actions
+//
+	include( "tools/dmd.ljs" );
+	include( "tools/gdc.ljs" );
+	include( "tools/ldc.ljs" );
+
+	include( "actions/gmake.ljs" );
+	include( "actions/vcxproj.ljs" );
+	include( "actions/visuald.ljs" );
+
+	return m;

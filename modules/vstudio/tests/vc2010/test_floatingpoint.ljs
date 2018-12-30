@@ -1,0 +1,53 @@
+//-
+// tests/actions/vstudio/vc2010/test_floatingpoint.ljs
+// Validate handling of vectorextensions() in VS 2010 C/C++ projects.
+//
+// Created 26 Mar 2015 by Jason Perkins
+// Copyright (c) 2015 Jason Perkins and the Premake project
+//-
+
+	var p = premake;
+	var suite = test.declare("vs2010_vc_floatingpoint");
+	var m = p.vstudio.vc2010;
+
+
+	var wks, prj;
+
+	function suite.setup() {
+		p.action.set("vs2010");
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare() {
+		var cfg = test.getconfig(prj, "Debug");
+		m.floatingPointModel(cfg);
+	}
+
+
+
+	function suite.instructionSet_onNotSet() {
+		test.isemptycapture();
+	}
+
+
+	function suite.floatingPoint_onFloatFast() {
+		floatingpoint ("fast");
+		prepare();
+		test.capture ([=[
+<FloatingPointModel>Fast</FloatingPointModel>
+		]=]);
+	}
+
+	function suite.floatingPoint_onFloatStrict() {
+		floatingpoint ("strict");
+		prepare();
+		test.capture ([=[
+<FloatingPointModel>Strict</FloatingPointModel>
+		]=]);
+	}
+
+	function suite.floatingPoint_onDefault() {
+		floatingpoint ("Default");
+		prepare();
+		test.isemptycapture();
+	}

@@ -1,0 +1,30 @@
+source = {};
+sink = {};
+pump = {};
+filter = {};
+
+// source.chain
+dofile("ex6.ljs");
+
+// source.file
+dofile("ex5.ljs");
+
+// encode
+require("mime");
+encode = mime.encode;
+
+// sink.chain
+require("ltn12");
+sink.chain = ltn12.sink.chain;
+
+// wrap
+wrap = mime.wrap;
+
+// sink.file
+sink.file = ltn12.sink.file;
+
+// pump.all
+dofile("ex10.ljs");
+
+// run test
+dofile("ex11.ljs");

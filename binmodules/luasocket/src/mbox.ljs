@@ -1,0 +1,92 @@
+var _M = {};
+
+if( module ) {
+    mbox = _M;
+} 
+
+function _M.split_message(message_s) {
+    var message = {};
+    message_s = string.gsub(message_s, "\r\n", "\n");
+    string.gsub(message_s, "^(.-\n)\n", function (h) { message.headers = h; });
+    string.gsub(message_s, "^.-\n\n(.*)", function (b) { message.body = b; });
+    if( ! message.body ) {
+        string.gsub(message_s, "^\n(.*)", function (b) { message.body = b; });
+    }
+    if( ! message.headers && ! message.body ) {
+        message.headers = message_s;
+    }
+    return message.headers || "", message.body || "";
+}
+
+function _M.split_headers(headers_s) {
+    var headers = {};
+    headers_s = string.gsub(headers_s, "\r\n", "\n");
+    headers_s = string.gsub(headers_s, "\n[ ]+", " ");
+    string.gsub("\n" .. headers_s, "\n([^\n]+)", function (h) { table.insert(headers, h); });
+    return headers;
+}
+
+function _M.parse_header(header_s) {
+    header_s = string.gsub(header_s, "\n[ ]+", " ");
+    header_s = string.gsub(header_s, "\n+", "");
+    var _, __, name, value = string.find(header_s, "([^%s:]-):%s*(.*)");
+    return name, value;
+}
+
+function _M.parse_headers(headers_s) {
+    var headers_t = _M.split_headers(headers_s);
+    var headers = {};
+    for( i = 1, #headers_t ) {
+        var name, value = _M.parse_header(headers_t[i]);
+        if( name ) {
+            name = string.lower(name);
+            if( headers[name] ) {
+                headers[name] = headers[name] .. ", " .. value;
+            } else { headers[name] = value; }
+        }
+    }
+    return headers;
+}
+
+function _M.parse_from(from) {
+    var _, __, name, address = string.find(from, "^%s*(.-)%s*%<(.-)%>");
+    if( ! address ) {
+        _, __, address = string.find(from, "%s*(.+)%s*");
+    }
+    name = name || "";
+    address = address || "";
+    if( name == "" ) { name = address; }
+    name = string.gsub(name, '"', "");
+    return name, address;
+}
+
+function _M.split_mbox(mbox_s) {
+    var mbox = {};
+    mbox_s = string.gsub(mbox_s, "\r\n", "\n") .."\n\nFrom \n";
+    var nj, i, j = 1, 1, 1;
+    while( 1 ) {
+        i, nj = string.find(mbox_s, "\n\nFrom .-\n", j);
+        if( ! i ) { break; }
+        var message = string.sub(mbox_s, j, i-1);
+        table.insert(mbox, message);
+        j = nj+1;
+    }
+    return mbox;
+}
+
+function _M.parse(mbox_s) {
+    var mbox = _M.split_mbox(mbox_s);
+    for( i = 1, #mbox ) {
+        mbox[i] = _M.parse_message(mbox[i]);
+    }
+    return mbox;
+}
+
+function _M.parse_message(message_s) {
+    var message = {};
+    message.headers, message.body = _M.split_message(message_s);
+    message.headers = _M.parse_headers(message.headers);
+    return message;
+}
+
+return _M;

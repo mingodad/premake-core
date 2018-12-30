@@ -1,0 +1,13 @@
+//---------------------------------------------------------------------------
+// Little program to adjust end of line markers.
+// LuaSocket sample files
+// Author: Diego Nehab
+//---------------------------------------------------------------------------
+var mime = require("mime");
+var ltn12 = require("ltn12");
+var marker = '\n';
+if( arg && arg[1] == '-d' ) { marker = '\r\n'; }
+var filter = mime.normalize(marker);
+var source = ltn12.source.chain(ltn12.source.file(io.stdin), filter);
+var sink = ltn12.sink.file(io.stdout);
+ltn12.pump.all(source, sink);

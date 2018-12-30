@@ -1,0 +1,544 @@
+//-
+// gcc.ljs
+// Provides GCC-specific configuration strings.
+// Copyright (c) 2002-2015 Jason Perkins and the Premake project
+//-
+
+	var p = premake;
+
+	p.tools.gcc = {};
+	var gcc = p.tools.gcc;
+
+	var project = p.project;
+	var config = p.config;
+
+
+//
+// Returns list of C preprocessor flags for a configuration.
+//
+
+	gcc.cppflags = {
+		system = {
+			haiku = "-MMD",
+			wii = { "-MMD", "-MP", "-I$(LIBOGC_INC)", "$(MACHDEP)" },
+			_ = { "-MMD", "-MP" }
+		}
+	};
+
+	function gcc.getcppflags(cfg) {
+		var flags = config.mapFlags(cfg, gcc.cppflags);
+		return flags;
+	}
+
+
+//
+// Returns list of C compiler flags for a configuration.
+//
+	gcc.shared = {
+		architecture = {
+			x86 = "-m32",
+			x86_64 = "-m64",
+		},
+		flags = {
+			FatalCompileWarnings = "-Werror",
+			LinkTimeOptimization = "-flto",
+			ShadowedVariables = "-Wshadow",
+			UndefinedIdentifiers = "-Wundef",
+		},
+		floatingpoint = {
+			Fast = "-ffast-math",
+			Strict = "-ffloat-store",
+		},
+		strictaliasing = {
+			Off = "-fno-strict-aliasing",
+			Level1 = { "-fstrict-aliasing", "-Wstrict-aliasing=1" },
+			Level2 = { "-fstrict-aliasing", "-Wstrict-aliasing=2" },
+			Level3 = { "-fstrict-aliasing", "-Wstrict-aliasing=3" },
+		},
+		optimize = {
+			Off = "-O0",
+			On = "-O2",
+			Debug = "-Og",
+			Full = "-O3",
+			Size = "-Os",
+			Speed = "-O3",
+		},
+		pic = {
+			On = "-fPIC",
+		},
+		vectorextensions = {
+			AVX = "-mavx",
+			AVX2 = "-mavx2",
+			SSE = "-msse",
+			SSE2 = "-msse2",
+			SSE3 = "-msse3",
+			SSSE3 = "-mssse3",
+			["SSE4.1"] = "-msse4.1",
+		},
+		isaextensions = {
+			MOVBE = "-mmovbe",
+			POPCNT = "-mpopcnt",
+			PCLMUL = "-mpclmul",
+			LZCNT = "-mlzcnt",
+			BMI = "-mbmi",
+			BMI2 = "-mbmi2",
+			F16C = "-mf16c",
+			AES = "-maes",
+			FMA = "-mfma",
+			FMA4 = "-mfma4",
+			RDRND = "-mrdrnd",
+		},
+		warnings = {
+			Extra = {"-Wall", "-Wextra"},
+			High = "-Wall",
+			Off = "-w",
+		},
+		symbols = {
+			On = "-g"
+		},
+		unsignedchar = {
+			On = "-funsigned-char",
+			Off = "-fno-unsigned-char"
+		},
+		omitframepointer = {
+			On = "-fomit-frame-pointer",
+			Off = "-fno-omit-frame-pointer"
+		}
+	};
+
+	gcc.cflags = {
+		cdialect = {
+			["C89"] = "-std=c89",
+			["C90"] = "-std=c90",
+			["C99"] = "-std=c99",
+			["C11"] = "-std=c11",
+			["gnu89"] = "-std=gnu89",
+			["gnu90"] = "-std=gnu90",
+			["gnu99"] = "-std=gnu99",
+			["gnu11"] = "-std=gnu11",
+		}
+	};
+
+	function gcc.getcflags(cfg) {
+		var shared_flags = config.mapFlags(cfg, gcc.shared);
+		var cflags = config.mapFlags(cfg, gcc.cflags);
+		var flags = table.join(shared_flags, cflags);
+		flags = table.join(flags, gcc.getwarnings(cfg));
+		return flags;
+	}
+
+	function gcc.getwarnings(cfg) {
+		var result = {};
+		for( _, enable in ipairs(cfg.enablewarnings) ) {
+			table.insert(result, '-W' .. enable);
+		}
+		for( _, disable in ipairs(cfg.disablewarnings) ) {
+			table.insert(result, '-Wno-' .. disable);
+		}
+		for( _, fatal in ipairs(cfg.fatalwarnings) ) {
+			table.insert(result, '-Werror=' .. fatal);
+		}
+		return result;
+	}
+
+
+//
+// Returns list of C++ compiler flags for a configuration.
+//
+
+	gcc.cxxflags = {
+		exceptionhandling = {
+			Off = "-fno-exceptions"
+		},
+		flags = {
+			NoBufferSecurityCheck = "-fno-stack-protector",
+		},
+		cppdialect = {
+			["C++98"] = "-std=c++98",
+			["C++0x"] = "-std=c++0x",
+			["C++11"] = "-std=c++11",
+			["C++1y"] = "-std=c++1y",
+			["C++14"] = "-std=c++14",
+			["C++1z"] = "-std=c++1z",
+			["C++17"] = "-std=c++17",
+			["gnu++98"] = "-std=gnu++98",
+			["gnu++0x"] = "-std=gnu++0x",
+			["gnu++11"] = "-std=gnu++11",
+			["gnu++1y"] = "-std=gnu++1y",
+			["gnu++14"] = "-std=gnu++14",
+			["gnu++1z"] = "-std=gnu++1z",
+			["gnu++17"] = "-std=gnu++17",
+		},
+		rtti = {
+			Off = "-fno-rtti"
+		},
+		visibility = {
+			Default = "-fvisibility=default",
+			Hidden = "-fvisibility=hidden",
+			Internal = "-fvisibility=internal",
+			Protected = "-fvisibility=protected",
+		},
+		inlinesvisibility = {
+			Hidden = "-fvisibility-inlines-hidden"
+		}
+	};
+
+	function gcc.getcxxflags(cfg) {
+		var shared_flags = config.mapFlags(cfg, gcc.shared);
+		var cxxflags = config.mapFlags(cfg, gcc.cxxflags);
+		var flags = table.join(shared_flags, cxxflags);
+		flags = table.join(flags, gcc.getwarnings(cfg));
+		return flags;
+	}
+
+
+//
+// Decorate defines for the GCC command line.
+//
+
+	function gcc.getdefines(defines) {
+		var result = {};
+		for( _, define in ipairs(defines) ) {
+			table.insert(result, '-D' .. p.esc(define));
+		}
+		return result;
+	}
+
+	function gcc.getundefines(undefines) {
+		var result = {};
+		for( _, undefine in ipairs(undefines) ) {
+			table.insert(result, '-U' .. p.esc(undefine));
+		}
+		return result;
+	}
+
+
+//
+// Returns a list of forced include files, decorated for the compiler
+// command line.
+//
+// @param cfg
+//    The project configuration.
+// @return
+//    An array of force include files with the appropriate flags.
+//
+
+	function gcc.getforceincludes(cfg) {
+		var result = {};
+
+		table.foreachi(cfg.forceincludes, function(value) {
+			var fn = project.getrelative(cfg.project, value);
+			table.insert(result, string.format('-include %s', p.quoted(fn)));
+		});
+
+		return result;
+	}
+
+
+//
+// Decorate include file search paths for the GCC command line.
+//
+
+	function gcc.getincludedirs(cfg, dirs, sysdirs) {
+		var result = {};
+		for( _, dir in ipairs(dirs) ) {
+			dir = project.getrelative(cfg.project, dir);
+			table.insert(result, '-I' .. p.quoted(dir));
+		}
+		for( _, dir in ipairs(sysdirs || {}) ) {
+			dir = project.getrelative(cfg.project, dir);
+			table.insert(result, '-isystem ' .. p.quoted(dir));
+		}
+		return result;
+	}
+
+//
+// Return a list of decorated rpaths
+//
+
+	function gcc.getrunpathdirs(cfg, dirs) {
+		var result = {};
+
+		if( ! (table.contains(os.getSystemTags(cfg.system), "darwin")
+				|| (cfg.system == p.LINUX)) ) {
+			return result;
+		}
+
+		var rpaths = {};
+
+		// User defined runpath search paths
+		for( _, fullpath in ipairs(cfg.runpathdirs) ) {
+			var rpath = path.getrelative(cfg.buildtarget.directory, fullpath);
+			if( ! (table.contains(rpaths, rpath)) ) {
+				table.insert(rpaths, rpath);
+			}
+		}
+
+		// Automatically add linked shared libraries path relative to target directory
+		for( _, sibling in ipairs(config.getlinks(cfg, "siblings", "object")) ) {
+			if( (sibling.kind == p.SHAREDLIB) ) {
+				var fullpath = sibling.linktarget.directory;
+				var rpath = path.getrelative(cfg.buildtarget.directory, fullpath);
+				if( ! (table.contains(rpaths, rpath)) ) {
+					table.insert(rpaths, rpath);
+				}
+			}
+		}
+
+		for( _, rpath in ipairs(rpaths) ) {
+			if( table.contains(os.getSystemTags(cfg.system), "darwin") ) {
+				rpath = "@loader_path/" .. rpath;
+			} else if( (cfg.system == p.LINUX) ) {
+				rpath = (rpath == "." ? "" : "/" .. rpath);
+				rpath = "$$ORIGIN" .. rpath;
+			}
+
+			table.insert(result, "-Wl,-rpath,'" .. rpath .. "'");
+		}
+
+		return result;
+	}
+
+//
+// get the right output flag.
+//
+	function gcc.getsharedlibarg(cfg) {
+		if( table.contains(os.getSystemTags(cfg.system), "darwin") ) {
+			if( cfg.sharedlibtype == "OSXBundle" ) {
+				return "-bundle";
+			} else if( cfg.sharedlibtype == "OSXFramework" ) {
+				return "-framework";
+			} else {
+				return "-dynamiclib";
+			}
+		} else {
+			return "-shared";
+		}
+	}
+
+
+//
+// Return a list of LDFLAGS for a specific configuration.
+//
+
+	function gcc.ldsymbols(cfg) {
+		// OS X has a bug, see http://lists.apple.com/archives/Darwin-dev/2006/Sep/msg00084.html
+		return (table.contains(os.getSystemTags(cfg.system) , "darwin") ? "-Wl,-x" : "-s");
+	}
+
+	gcc.ldflags = {
+		architecture = {
+			x86 = "-m32",
+			x86_64 = "-m64",
+		},
+		flags = {
+			LinkTimeOptimization = "-flto",
+		},
+		kind = {
+			SharedLib = function(cfg) {
+				var r = { gcc.getsharedlibarg(cfg) };
+				if( cfg.system == p.WINDOWS && ! cfg.flags.NoImportLib ) {
+					table.insert(r, '-Wl,--out-implib="' .. cfg.linktarget.relpath .. '"');
+				} else if( cfg.system == p.LINUX ) {
+					table.insert(r, '-Wl,-soname=' .. p.quoted(cfg.linktarget.name));
+				} else if( table.contains(os.getSystemTags(cfg.system), "darwin") ) {
+					table.insert(r, '-Wl,-install_name,' .. p.quoted('@rpath/' .. cfg.linktarget.name));
+				}
+				return r;
+			},
+			WindowedApp = function(cfg) {
+				if( cfg.system == p.WINDOWS ) { return "-mwindows"; }
+			},
+		},
+		system = {
+			wii = "$(MACHDEP)",
+		},
+		symbols = {
+			Off = gcc.ldsymbols,
+			Default = gcc.ldsymbols,
+		}
+	};
+
+	function gcc.getldflags(cfg) {
+		var flags = config.mapFlags(cfg, gcc.ldflags);
+		return flags;
+	}
+
+
+
+//
+// Return a list of decorated additional libraries directories.
+//
+
+	gcc.libraryDirectories = {
+		architecture = {
+			x86 = function (cfg) {
+				var r = {};
+				if( ! table.contains(os.getSystemTags(cfg.system), "darwin") ) {
+					table.insert (r, "-L/usr/lib32");
+				}
+				return r;
+			},
+			x86_64 = function (cfg) {
+				var r = {};
+				if( ! table.contains(os.getSystemTags(cfg.system), "darwin") ) {
+					table.insert (r, "-L/usr/lib64");
+				}
+				return r;
+			},
+		},
+		system = {
+			wii = "-L$(LIBOGC_LIB)",
+		}
+	};
+
+	function gcc.getLibraryDirectories(cfg) {
+		var flags = {};
+
+		// Scan the list of linked libraries. If any are referenced with
+		// paths, add those to the list of library search paths. The call
+		// config.getlinks() all includes cfg.libdirs.
+		for( _, dir in ipairs(config.getlinks(cfg, "system", "directory")) ) {
+			table.insert(flags, '-L' .. p.quoted(dir));
+		}
+
+		if( cfg.flags.RelativeLinks ) {
+			for( _, dir in ipairs(config.getlinks(cfg, "siblings", "directory")) ) {
+				var libFlag = "-L" .. p.project.getrelative(cfg.project, dir);
+				if( ! table.contains(flags, libFlag) ) {
+					table.insert(flags, libFlag);
+				}
+			}
+		}
+
+		for( _, dir in ipairs(cfg.syslibdirs) ) {
+			table.insert(flags, '-L' .. p.quoted(dir));
+		}
+
+		var gccFlags = config.mapFlags(cfg, gcc.libraryDirectories);
+		flags = table.join(flags, gccFlags);
+
+		return flags;
+	}
+
+
+
+//
+// Return the list of libraries to link, decorated with flags as needed.
+//
+
+	function gcc.getlinks(cfg, systemonly, nogroups) {
+		var result = {};
+
+		if( ! systemonly ) {
+			if( cfg.flags.RelativeLinks ) {
+				var libFiles = config.getlinks(cfg, "siblings", "basename");
+				for( _, link in ipairs(libFiles) ) {
+					if( string.startswith(link, "lib") ) {
+						link = link->sub(4);
+					}
+					table.insert(result, "-l" .. link);
+				}
+			} else {
+				// Don't use the -l form for sibling libraries, since they may have
+				// custom prefixes or extensions that will confuse the linker. Instead
+				// just list out the full relative path to the library.
+				result = config.getlinks(cfg, "siblings", "fullpath");
+			}
+		}
+
+		if( ! nogroups && #result > 1 && (cfg.linkgroups == p.ON) ) {
+			table.insert(result, 1, "-Wl,--start-group");
+			table.insert(result, "-Wl,--end-group");
+		}
+
+		// The "-l" flag is fine for system libraries
+		var links = config.getlinks(cfg, "system", "fullpath");
+		var static_syslibs = {"-Wl,-Bstatic"};
+		var shared_syslibs = {};
+
+		for( _, link in ipairs(links) ) {
+			if( path.isframework(link) ) {
+				table.insert(result, "-framework");
+				table.insert(result, path.getbasename(link));
+			} else if( path.isobjectfile(link) ) {
+				table.insert(result, link);
+			} else {
+				var endswith = function(s, ptrn) {
+					return ptrn == string.sub(s, -string.len(ptrn));
+				};
+				var name = path.getname(link);
+				// Check whether link mode decorator is present
+				if( endswith(name, ":static") ) {
+					name = string.sub(name, 0, -8);
+					table.insert(static_syslibs, "-l" .. name);
+				} else if( endswith(name, ":shared") ) {
+					name = string.sub(name, 0, -8);
+					table.insert(shared_syslibs, "-l" .. name);
+				} else {
+					table.insert(shared_syslibs, "-l" .. name);
+				}
+			}
+		}
+
+		var move = function(a1, a2) {
+			var t = #a2;
+			for( i = 1, #a1 ) { a2[t + i] = a1[i]; }
+		};
+		if( #static_syslibs > 1 ) {
+			table.insert(static_syslibs, "-Wl,-Bdynamic");
+			move(static_syslibs, result);
+		}
+		move(shared_syslibs, result);
+
+		return result;
+	}
+
+
+//
+// Returns makefile-specific configuration rules.
+//
+
+	gcc.makesettings = {
+		system = {
+			wii = [=[
+  ifeq ($(strip $(DEVKITPPC)),)
+    $(error "DEVKITPPC environment variable is not set")'
+  endif
+  include $(DEVKITPPC)/wii_rules']=]
+		}
+	};
+
+	function gcc.getmakesettings(cfg) {
+		var settings = config.mapFlags(cfg, gcc.makesettings);
+		return table.concat(settings);
+	}
+
+
+//
+// Retrieves the executable command name for a tool, based on the
+// provided configuration and the operating environment.
+//
+// @param cfg
+//    The configuration to query.
+// @param tool
+//    The tool to fetch, one of "cc" for the C compiler, "cxx" for
+//    the C++ compiler, or "ar" for the static linker.
+// @return
+//    The executable command name for a tool, or nil if the system's
+//    default value should be used.
+//
+
+	gcc.tools = {
+		cc = "gcc",
+		cxx = "g++",
+		ar = "ar",
+		rc = "windres"
+	};
+
+	function gcc.gettoolname(cfg, tool) {
+		if( (cfg.gccprefix && gcc.tools[tool]) || tool == "rc" ) {
+			return (cfg.gccprefix || "") .. gcc.tools[tool];
+		}
+		return null;
+	}

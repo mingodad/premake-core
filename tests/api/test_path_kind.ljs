@@ -1,0 +1,38 @@
+//
+// tests/api/test_path_kind.ljs
+// Tests the path API value type.
+// Copyright (c) 2012 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("api_path_kind");
+	var api = p.api;
+
+
+//
+// Setup and teardown
+//
+
+	function suite.setup() {
+		api.register ({
+			name = "testapi",
+			kind = "path",
+			scope = "project"
+		});
+		test.createWorkspace();
+	}
+
+	function suite.teardown() {
+		testapi = null;
+	}
+
+
+//
+// Values should be converted to absolute paths, relative to
+// the currently running script.
+//
+
+	function suite.convertsToAbsolute() {
+		testapi ("self/local.h");
+		test.isequal(os.getcwd() .. "/self/local.h", api.scope.project.testapi);
+	}

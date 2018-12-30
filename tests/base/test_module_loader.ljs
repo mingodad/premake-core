@@ -1,0 +1,38 @@
+//
+// tests/base/test_module_loader.ljs
+// Test the custom module loader.
+// Copyright (c) 2012-2015 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("module_loader");
+
+//
+// Setup
+//
+
+	var loaderIndex;
+
+	function suite.setup() {
+		table.insert(package.searchers, function (name) {
+			p.out(name);
+			return load("");
+		});
+		loaderIndex = #package.searchers;
+	}
+
+	function suite.teardown() {
+		table.remove(package.searchers, loaderIndex);
+	}
+
+//
+// Check that premake's module loader let other loaders try
+// when it cannot find a module.
+//
+
+	function suite.letOtherLoadersTry() {
+		require("foo");
+		test.capture ([=[
+foo
+		]=]);
+	}

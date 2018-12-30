@@ -1,0 +1,344 @@
+//
+// tests/actions/vstudio/vc2010/test_config_props.ljs
+// Validate generation of the configuration property group.
+// Copyright (c) 2011-2013 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("vstudio_vs2010_config_props");
+	var vc2010 = p.vstudio.vc2010;
+	var project = p.project;
+
+
+//
+// Setup
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		p.action.set("vs2010");
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare() {
+		cfg = test.getconfig(prj, "Debug");
+		vc2010.configurationProperties(cfg);
+	}
+
+
+//
+// Check the structure with the default project values.
+//
+
+	function suite.structureIsCorrect_onDefaultValues() {
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<CharacterSet>Unicode</CharacterSet>
+	<PlatformToolset>v100</PlatformToolset>
+</PropertyGroup>
+		]=]);
+	}
+
+
+//
+// Check the configuration type for differenet project kinds.
+//
+
+	function suite.configurationType_onConsoleApp() {
+		kind ("ConsoleApp");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+		]=]);
+	}
+
+	function suite.configurationType_onWindowedApp() {
+		kind ("WindowedApp");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+		]=]);
+	}
+
+	function suite.configurationType_onSharedLib() {
+		kind ("SharedLib");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>DynamicLibrary</ConfigurationType>
+		]=]);
+	}
+
+	function suite.configurationType_onStaticLib() {
+		kind ("StaticLib");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>StaticLibrary</ConfigurationType>
+		]=]);
+	}
+
+//
+// Debug configurations (for some definition of "debug") should use the debug libraries.
+//
+
+	function suite.debugLibraries_onDebugConfig() {
+		symbols ("On");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>true</UseDebugLibraries>
+		]=]);
+	}
+
+
+//
+// Check the support for Managed C++.
+//
+
+	function suite.clrSupport_onClrOn() {
+		clr ("On");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<CLRSupport>true</CLRSupport>
+		]=]);
+	}
+
+	function suite.clrSupport_onClrOff() {
+		clr ("Off");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+		]=]);
+	}
+
+	function suite.clrSupport_onClrUnsafe() {
+		clr ("Unsafe");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<CLRSupport>true</CLRSupport>
+		]=]);
+	}
+
+	function suite.clrSupport_onClrSafe() {
+		clr ("Safe");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<CLRSupport>Safe</CLRSupport>
+		]=]);
+	}
+
+	function suite.clrSupport_onClrPure() {
+		clr ("Pure");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<CLRSupport>Pure</CLRSupport>
+		]=]);
+	}
+
+
+//
+// Check the support for building with MFC.
+//
+
+	function suite.useOfMfc_onDynamicRuntime() {
+		flags ("MFC");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<UseOfMfc>Dynamic</UseOfMfc>
+		]=]);
+	}
+
+	function suite.useOfMfc_onStaticRuntime() {
+		flags ({ "MFC" });
+		staticruntime ("On");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<UseOfMfc>Static</UseOfMfc>
+		]=]);
+	}
+
+//
+// Check the support for building with ATL.
+//
+
+	function suite.useOfAtl_onDynamicRuntime() {
+		atl ("Dynamic");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<UseOfATL>Dynamic</UseOfATL>
+		]=]);
+	}
+
+	function suite.useOfAtl_onStaticRuntime() {
+		atl ("Static");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<UseOfATL>Static</UseOfATL>
+		]=]);
+	}
+
+//
+// Check handling of the ReleaseRuntime flag; should override the
+// default behavior of linking the debug runtime when symbols are
+// enabled with no optimizations.
+//
+
+	function suite.releaseRuntime_onFlag() {
+		runtime ("Release");
+		symbols ("On");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+		]=]);
+	}
+
+
+//
+// Check the default settings for a Makefile configuration: new
+// configuration type, no character set, output and intermediate
+// folders are moved up from their normal location in the output
+// configuration element.
+//
+
+	function suite.structureIsCorrect_onMakefile() {
+		kind ("Makefile");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Makefile</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<OutDir>bin\Debug\</OutDir>
+	<IntDir>obj\Debug\</IntDir>
+</PropertyGroup>
+		]=]);
+	}
+
+	function suite.structureIsCorrect_onNone() {
+		kind ("None");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Makefile</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<OutDir>bin\Debug\</OutDir>
+	<IntDir>obj\Debug\</IntDir>
+</PropertyGroup>
+		]=]);
+	}
+
+//
+// Same as above but for Utility
+//
+
+	function suite.structureIsCorrect_onUtility() {
+		kind ("Utility");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Utility</ConfigurationType>
+	<PlatformToolset>v100</PlatformToolset>
+</PropertyGroup>
+		]=]);
+	}
+
+//
+// Check the LinkTimeOptimization flag
+//
+
+	function suite.useOfLinkTimeOptimization() {
+		flags ({ "LinkTimeOptimization" });
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<CharacterSet>Unicode</CharacterSet>
+	<PlatformToolset>v100</PlatformToolset>
+	<WholeProgramOptimization>true</WholeProgramOptimization>
+		]=]);
+	}
+
+
+//
+// Check the WindowsSDKDesktopARMSupport element
+//
+
+	function suite.WindowsSDKDesktopARMSupport_off() {
+		system ("ios");
+		architecture ("ARM");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<CharacterSet>Unicode</CharacterSet>
+	<PlatformToolset>v100</PlatformToolset>
+</PropertyGroup>
+		]=]);
+	}
+
+	function suite.WindowsSDKDesktopARMSupport_on() {
+		system ("windows");
+		architecture ("ARM");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<CharacterSet>Unicode</CharacterSet>
+	<PlatformToolset>v100</PlatformToolset>
+	<WindowsSDKDesktopARMSupport>true</WindowsSDKDesktopARMSupport>
+</PropertyGroup>
+		]=]);
+	}
+
+	function suite.WindowsSDKDesktopARM64Support() {
+		system ("windows");
+		architecture ("ARM64");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'" Label="Configuration">
+	<ConfigurationType>Application</ConfigurationType>
+	<UseDebugLibraries>false</UseDebugLibraries>
+	<CharacterSet>Unicode</CharacterSet>
+	<PlatformToolset>v100</PlatformToolset>
+	<WindowsSDKDesktopARM64Support>true</WindowsSDKDesktopARM64Support>
+</PropertyGroup>
+		]=]);
+	}

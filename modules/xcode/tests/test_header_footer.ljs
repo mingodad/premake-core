@@ -1,0 +1,51 @@
+//-
+// xcode/tests/test_header.ljs
+// Validate generation for Xcode workspaces.
+// Author Jason Perkins
+// Copyright (c) 2009-2015 Jason Perkins and the Premake project
+//-
+
+	var suite = test.declare("xcode_header");
+	var p = premake;
+	var xcode = p.modules.xcode;
+
+
+//
+// Setup
+//
+
+	var wks;
+
+	function suite.setup() {
+		_TARGET_OS = "macosx";
+		p.action.set('xcode4');
+		wks = test.createWorkspace();
+	}
+
+	var function prepare() {
+		prj = test.getproject(wks, 1);
+		xcode.header(prj);
+		xcode.footer(prj);
+	}
+
+
+//
+// Check basic structure
+//
+
+	function suite.onDefaults() {
+		prepare();
+		test.capture ([=[
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+	};
+	rootObject = 08FB7793FE84155DC02AAC07 /* Project object */;
+}
+		]=]);
+	}

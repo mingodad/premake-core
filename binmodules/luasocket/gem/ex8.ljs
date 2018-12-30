@@ -1,0 +1,5 @@
+var input = source.file(io.stdin);
+var output, t = sink.table();
+output = sink.chain(normalize(CRLF), output);
+pump.all(input, output);
+io.write(table.concat(t));

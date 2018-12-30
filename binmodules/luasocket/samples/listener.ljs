@@ -1,0 +1,25 @@
+//---------------------------------------------------------------------------
+// TCP sample: Little program to dump lines received at a given port
+// LuaSocket sample files
+// Author: Diego Nehab
+//---------------------------------------------------------------------------
+var socket = require("socket");
+host = host || "*";
+port = port || 8080;
+if( arg ) {
+	host = arg[1] || host;
+	port = arg[2] || port;
+}
+print("Binding to host '" ..host.. "' and port " ..port.. "...");
+s = assert(socket.bind(host, port));
+i, p   = s->getsockname();
+assert(i, p);
+print("Waiting connection from talker on " .. i .. ":" .. p .. "...");
+c = assert(s->accept());
+print("Connected. Here is the stuff:");
+l, e = c->receive();
+while( ! e ) {
+	print(l);
+	l, e = c->receive();
+}
+print(e);

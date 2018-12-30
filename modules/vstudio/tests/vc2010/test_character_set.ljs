@@ -1,0 +1,57 @@
+//
+// tests/actions/vstudio/vc2010/test_character_set.ljs
+// Validate generation Unicode/MBCS settings.
+// Copyright (c) 2011-2015 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("vstudio_vs2010_character_set");
+	var vc2010 = p.vstudio.vc2010;
+
+
+	var wks, prj;
+
+	function suite.setup() {
+		p.action.set("vs2010");
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare() {
+		var cfg = test.getconfig(prj, "Debug");
+		vc2010.characterSet(cfg);
+	}
+
+
+	function suite.onDefault() {
+		prepare();
+		test.capture ([=[
+<CharacterSet>Unicode</CharacterSet>
+		]=]);
+	}
+
+
+	function suite.onUnicode() {
+		characterset ("Unicode");
+		prepare();
+		test.capture ([=[
+<CharacterSet>Unicode</CharacterSet>
+		]=]);
+	}
+
+
+	function suite.onMBCS() {
+		characterset ("MBCS");
+		prepare();
+		test.capture ([=[
+<CharacterSet>MultiByte</CharacterSet>
+		]=]);
+	}
+
+	function suite.onASCII() {
+		characterset ("ASCII");
+		prepare();
+		test.capture ([=[
+<CharacterSet>NotSet</CharacterSet>
+		]=]);
+	}
+

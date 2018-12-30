@@ -1,0 +1,30 @@
+var socket = require("socket");
+
+var finalizer_called;
+
+var func = socket.protect(function(err, ...) {
+    var try = socket.newtry(function() {
+        finalizer_called = true;
+    });
+
+    if( err ) {
+        return error(err, 0);
+    } else {
+        return try(...);
+    }
+});
+
+var ret1, ret2, ret3 = func(false, 1, 2, 3);
+assert(! finalizer_called, "unexpected finalizer call");
+assert(ret1 == 1 && ret2 == 2 && ret3 == 3, "incorrect return values");
+
+ret1, ret2, ret3 = func(false, false, "error message");
+assert(finalizer_called, "finalizer not called");
+assert(ret1 == null && ret2 == "error message" && ret3 == null, "incorrect return values");
+
+var err = {key = "value"};
+ret1, ret2 = pcall(func, err);
+assert(! ret1, "error not rethrown");
+assert(ret2 == err, "incorrect error rethrown");
+
+print("OK");

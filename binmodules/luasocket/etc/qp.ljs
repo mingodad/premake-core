@@ -1,0 +1,23 @@
+//---------------------------------------------------------------------------
+// Little program to convert to and from Quoted-Printable
+// LuaSocket sample files
+// Author: Diego Nehab
+//---------------------------------------------------------------------------
+var ltn12 = require("ltn12");
+var mime = require("mime");
+var convert;
+arg = arg || {};
+var mode = arg && arg[1] || "-et";
+if( mode == "-et" ) {
+    var normalize = mime.normalize();
+    var qp = mime.encode("quoted-printable");
+    var wrap = mime.wrap("quoted-printable");
+    convert = ltn12.filter.chain(normalize, qp, wrap);
+} else if( mode == "-eb" ) {
+    var qp = mime.encode("quoted-printable", "binary");
+    var wrap = mime.wrap("quoted-printable");
+    convert = ltn12.filter.chain(qp, wrap);
+} else { convert = mime.decode("quoted-printable"); }
+var source = ltn12.source.chain(ltn12.source.file(io.stdin), convert);
+var sink = ltn12.sink.file(io.stdout);
+ltn12.pump.all(source, sink);

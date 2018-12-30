@@ -1,0 +1,14 @@
+function source.chain(src, f) {
+  return function() {
+    if( ! src ) {
+      return null;
+    }
+    var chunk, err = src();
+    if( ! chunk ) {
+      src = null;
+      return f(null);
+    } else {
+      return f(chunk);
+    }
+  };
+}

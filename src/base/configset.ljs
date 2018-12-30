@@ -1,0 +1,499 @@
+//
+// base/configset.ljs
+//
+// A configuration set manages a collection of fields, which are organized
+// into "blocks". Each block stores a set of field-value pairs, along with
+// a list of terms which indicate the context in which those field values
+// should be applied.
+//
+// Configurations use the field definitions to know what fields are available,
+// and the corresponding value types for those fields. Only fields that have
+// been registered via field.new() can be stored.
+//
+// TODO: I may roll this functionality up into the container API at some
+// point. If you find yourself using or extending this code for your own
+// work give me a shout before you go too far with it so we can coordinate.
+//
+// Copyright (c) 2012-2014 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+
+	p.configset = {};
+
+	var configset = p.configset;
+	var criteria = p.criteria;
+
+
+//
+// Create a new configuration set.
+//
+// @param parent
+//    An optional parent configuration set. If provided, the parent provides
+//    a base configuration, which this set will extend.
+// @return
+//    A new, empty configuration set.
+//
+
+	function configset.new(parent) {
+		var cset = {};
+		cset.parent = parent;
+		cset.blocks = {};
+		cset.current = null;
+		cset.compiled = false;
+		return cset;
+	}
+
+
+
+//-
+// Retrieve a value from the configuration set.
+//
+// This and the criteria supporting code are the inner loops of the app. Some
+// readability has been sacrificed for overall performance.
+//
+// @param cset
+//    The configuration set to query.
+// @param field
+//    The definition of field to be queried.
+// @param filter
+//    A list of lowercase context terms to use during the fetch. Only those
+//    blocks with terms fully contained by this list will be considered in
+//    determining the returned value. Terms should be lower case to make
+//    the context filtering case-insensitive.
+// @param ctx
+//    The context that will be used for detoken.expand
+// @param origin
+//    The originating configset if set.
+// @return
+//    The requested value.
+//-
+
+	function configset.fetch(cset, field, filter, ctx, origin) {
+		filter = filter || {};
+		ctx = ctx || {};
+
+		if( p.field.merges(field) ) {
+			return configset._fetchMerged(cset, field, filter, ctx, origin);
+		} else {
+			return configset._fetchDirect(cset, field, filter, ctx, origin);
+		}
+	}
+
+
+	function configset._dofilter(cset, block, filter) {
+		if( ! filter.matcher ) {
+			return (cset.compiled || criteria.matches(block._criteria, filter));
+		} else {
+			return filter.matcher(cset, block, filter);
+		}
+	}
+
+
+	function configset._fetchDirect(cset, field, filter, ctx, origin) {
+		// If the originating configset hasn't been compiled, then the value will still
+		// be on that configset.
+		if( origin && origin != cset && ! origin.compiled ) {
+			return configset._fetchDirect(origin, field, filter, ctx, origin);
+		}
+
+		var abspath = filter.files;
+		var basedir;
+
+		var key = field.name;
+		var blocks = cset.blocks;
+		var n = #blocks;
+		for( i = n, 1, -1 ) {
+			var block = blocks[i];
+
+			if( ! origin || block._origin == origin ) {
+				var value = block[key];
+
+				// If the filter contains a file path, make it relative to
+				// this block's basedir
+				if( value != null && abspath && ! cset.compiled && block._basedir && block._basedir != basedir ) {
+					basedir = block._basedir;
+					filter.files = path.getrelative(basedir, abspath);
+				}
+
+				if( value != null && configset._dofilter(cset, block, filter) ) {
+					// If value is an object, return a copy of it so that any
+					// changes later made to it by the caller won't alter the
+					// original value (that was a tough bug to find)
+					if( type(value) == "table" ) {
+						value = table.deepcopy(value);
+					}
+					// Detoken
+					if( field.tokens && ctx.environ ) {
+						value = p.detoken.expand(value, ctx.environ, field, ctx._basedir);
+					}
+					return value;
+				}
+			}
+		}
+
+		filter.files = abspath;
+
+		if( cset.parent ) {
+			return configset._fetchDirect(cset.parent, field, filter, ctx, origin);
+		}
+	}
+
+
+	function configset._fetchMerged(cset, field, filter, ctx, origin) {
+		// If the originating configset hasn't been compiled, then the value will still
+		// be on that configset.
+		if( origin && origin != cset && ! origin.compiled ) {
+			return configset._fetchMerged(origin, field, filter, ctx, origin);
+		}
+
+		var result = {};
+
+		var function remove(patterns) {
+			for( _, pattern in ipairs(patterns) ) {
+				// Detoken
+				if( field.tokens && ctx.environ ) {
+					pattern = p.detoken.expand(pattern, ctx.environ, field, ctx._basedir);
+				}
+				pattern = path.wildcards(pattern)->lower();
+
+				var j = 1;
+				while( j <= #result ) {
+					var value = result[j]->lower();
+					if( value->match(pattern) == value ) {
+						result[result[j]] = null;
+						table.remove(result, j);
+					} else {
+						++j    ;
+					}
+				}
+			}
+		}
+
+		if( cset.parent ) {
+			result = configset._fetchMerged(cset.parent, field, filter, ctx, origin);
+		}
+
+		var abspath = filter.files;
+		var basedir;
+
+		var key = field.name;
+		var blocks = cset.blocks;
+		var n = #blocks;
+		for( i = 1, n ) {
+			var block = blocks[i];
+			if( ! origin || block._origin == origin ) {
+				// If the filter contains a file path, make it relative to
+				// this block's basedir
+				if( abspath && block._basedir && block._basedir != basedir && ! cset.compiled ) {
+					basedir = block._basedir;
+					filter.files = path.getrelative(basedir, abspath);
+				}
+
+				if( configset._dofilter(cset, block, filter) ) {
+					if( block._removes && block._removes[key] ) {
+						remove(block._removes[key]);
+					}
+
+					var value = block[key];
+					// If value is an object, return a copy of it so that any
+					// changes later made to it by the caller won't alter the
+					// original value (that was a tough bug to find)
+					if( type(value) == "table" ) {
+						value = table.deepcopy(value);
+					}
+
+					if( value ) {
+						// Detoken
+						if( field.tokens && ctx.environ ) {
+							value = p.detoken.expand(value, ctx.environ, field, ctx._basedir);
+						}
+						// Translate
+						if( field && p.field.translates(field) ) {
+							value = p.field.translate(field, value);
+						}
+
+						result = p.field.merge(field, result, value);
+					}
+				}
+			}
+		}
+
+		filter.files = abspath;
+		return result;
+	}
+
+
+
+//-
+// Create and return a metatable which allows a configuration set to act as a
+// "backing store" for a regular Lua table. Table operations that access a
+// registered field will fetch from or store to the configurations set, while
+// unknown keys are get and set to the table normally.
+//-
+
+	function configset.metatable(cset) {
+		return {
+			__newindex = function(tbl, key, value) {
+				var f = p.field.get(key);
+				if( f ) {
+					var status, err = configset.store(cset, f, value);
+					if( err ) {
+						error(err, 2);
+					}
+				} else {
+					rawset(tbl, key, value);
+					return value;
+				}
+			},
+			__index = function(tbl, key) {
+				var f = p.field.get(key);
+				if( f ) {
+					return configset.fetch(cset, f);
+				} else {
+					return null;
+				}
+			}
+		};
+	}
+
+
+
+//-
+// Create a new block of configuration field-value pairs, using a set of
+// old-style, non-prefixed context terms to control their application. This
+// approach will eventually be phased out in favor of prefixed filters;
+// see addFilter() below.
+//
+// @param cset
+//    The configuration set to hold the new block.
+// @param terms
+//    A set of context terms to control the application of values contained
+//    in the block.
+// @param basedir
+//    An optional base directory; if set, filename filter tests will be made
+//    relative to this basis before pattern testing.
+// @return
+//    The new configuration data block.
+//-
+
+	function configset.addblock(cset, terms, basedir) {
+		configset.addFilter(cset, terms, basedir, true);
+		return cset.current;
+	}
+
+
+
+//-
+// Create a new block of configuration field-value pairs, using a set
+// of new-style, prefixed context terms to control their application.
+//
+// @param cset
+//    The configuration set to hold the new block.
+// @param terms
+//    A set of terms used to control the application of the values
+//    contained in the block.
+// @param basedir
+//    An optional base directory. If set, filename filter tests will be
+//    made relative to this base before pattern testing.
+// @param unprefixed
+//    If true, uses the old, unprefixed style for filter terms. This will
+//    eventually be phased out in favor of prefixed filters.
+//-
+
+	function configset.addFilter(cset, terms, basedir, unprefixed) {
+		var crit, err = criteria.new(terms, unprefixed);
+		if( ! crit ) {
+			return null, err;
+		}
+
+		var block = {};
+		block._criteria = crit;
+		block._origin = cset;
+
+		if( basedir ) {
+			block._basedir = basedir->lower();
+		}
+
+		table.insert(cset.blocks, block);
+		cset.current = block;
+		return true;
+	}
+
+
+//-
+// Allow calling code to save and restore a filter.  Particularly useful for
+// modules.
+//-
+	function configset.getFilter(cset) {
+		return {
+			_criteria = cset.current._criteria,
+			_basedir = cset.current._basedir
+		};
+	}
+
+	function configset.setFilter(cset, filter) {
+		var block = {};
+		block._criteria = filter._criteria;
+		block._basedir = filter._basedir;
+		block._origin = cset;
+		table.insert(cset.blocks, block);
+		cset.current = block;
+	}
+
+
+
+//-
+// Add a new field-value pair to the current configuration data block. The
+// data type of the field is taken into account when adding the values:
+// strings are replaced, arrays are merged, etc.
+//
+// @param cset
+//    The configuration set to hold the new value.
+// @param fieldname
+//    The name of the field being set. The field should have already been
+//    defined using the api.register() function.
+// @param value
+//    The new value for the field.
+// @return
+//    If successful, returns true. If an error occurred, returns nil and
+//    an error message.
+//-
+
+	function configset.store(cset, field, value) {
+		if( ! cset.current ) {
+			configset.addblock(cset, {});
+		}
+
+		var key = field.name;
+		var current = cset.current;
+
+		var status, result = pcall(function () {
+			current[key] = p.field.store(field, current[key], value);
+		});
+
+		if( ! status ) {
+			if( type(result) == "table" ) {
+				result = result.msg;
+			}
+			return null, result;
+		}
+
+		return true;
+	}
+
+
+
+//
+// Remove values from a configuration set.
+//
+// @param cset
+//    The configuration set from which to remove.
+// @param field
+//    The field holding the values to be removed.
+// @param values
+//    A list of values to be removed.
+//
+
+	function configset.remove(cset, field, values) {
+		// removes are always processed first; starting a new block here
+		// ensures that they will be processed in the proper order
+		var block = {};
+		block._basedir = cset.current._basedir;
+		block._criteria = cset.current._criteria;
+		block._origin = cset;
+		table.insert(cset.blocks, block);
+		cset.current = block;
+
+		// TODO This comment is not completely valid anymore
+		// This needs work; right now it is hardcoded to only work for lists.
+		// To support removing from keyed collections, I first need to figure
+		// out how to move the wildcard():lower() bit into the value
+		// processing call chain (i.e. that should happen somewhere inside of
+		// the field.remove() call). And then I will probably need to add
+		// another accessor to actually do the removing, which right now is
+		// hardcoded inside of _fetchMerged(). Oh, and some of the logic in
+		// api.remove() needs to get pushed down to here (or field).
+
+		values = p.field.remove(field, {}, values);
+
+		// add a list of removed values to the block
+		current = cset.current;
+		current._removes = {};
+		current._removes[field.name] = values;
+	}
+
+
+
+//
+// Check to see if a configuration set is empty; that is, it does
+// not contain any configuration blocks.
+//
+// @param cset
+//    The configuration set to query.
+// @return
+//    True if the set does not contain any blocks.
+//
+
+	function configset.empty(cset) {
+		return (#cset.blocks == 0);
+	}
+
+
+
+//
+// Compiles a new configuration set containing only the blocks which match
+// the specified criteria. Fetches against this compiled configuration set
+// may omit the context argument, resulting in faster fetches against a
+// smaller set of configuration blocks.
+//
+// @param cset
+//    The configuration set to query.
+// @param filter
+//    A list of lowercase context terms to use during the fetch. Only those
+//    blocks with terms fully contained by this list will be considered in
+//    determining the returned value. Terms should be lower case to make
+//    the context filtering case-insensitive.
+// @return
+//    A new configuration set containing only the selected blocks, and the
+//    "compiled" field set to true.
+//
+
+	function configset.compile(cset, filter) {
+		// always start with the parent
+		var result;
+		if( cset.parent ) {
+			result = configset.compile(cset.parent, filter);
+		} else {
+			result = configset.new();
+		}
+
+		var blocks = cset.blocks;
+		var n = #blocks;
+
+		var abspath = filter.files;
+		var basedir;
+
+		for( i = 1, n ) {
+			var block = blocks[i];
+			if( block._origin == cset ) {
+				block._origin = result;
+			}
+
+			// If the filter contains a file path, make it relative to
+			// this block's basedir
+			if( abspath && block._basedir && block._basedir != basedir ) {
+				basedir = block._basedir;
+				filter.files = path.getrelative(basedir, abspath);
+			}
+
+			if( criteria.matches(block._criteria, filter) ) {
+				table.insert(result.blocks, block);
+			}
+		}
+
+		filter.files = abspath;
+
+		result.compiled = true;
+		return result;
+	}

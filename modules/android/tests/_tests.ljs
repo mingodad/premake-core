@@ -1,0 +1,6 @@
+require ("android");
+
+return {
+	"test_android_files.ljs",
+	"test_android_project.ljs",
+};

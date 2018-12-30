@@ -1,0 +1,299 @@
+var socket = require("socket");
+var ltn12 = require("ltn12");
+var mime = require("mime");
+
+var unpack = unpack || table.unpack;
+
+dofile("testsupport.ljs");
+
+var qptest = "qptest.bin";
+var eqptest = "qptest.bin2";
+var dqptest = "qptest.bin3";
+
+var b64test = "b64test.bin";
+var eb64test = "b64test.bin2";
+var db64test = "b64test.bin3";
+
+
+// from Machado de Assis, "A Mão e a Rosa"
+var mao = [=[
+    Cursavam estes dois moços a academia de S. Paulo, estando 
+    Luís Alves no quarto ano e Estêvão no terceiro. 
+    Conheceram-se na academia, e ficaram amigos íntimos, tanto
+    quanto podiam sê-lo dois espíritos diferentes, ou talvez por 
+    isso mesmo que o eram. Estêvão, dotado de extrema
+    sensibilidade, e não menor fraqueza de ânimo, afetuoso e
+    bom, não daquela bondade varonil, que é apanágio de uma alma
+    forte, mas dessa outra bondade mole e de cera, que vai à
+    mercê de todas as circunstâncias, tinha, além de tudo isso, 
+    o infortúnio de trazer ainda sobre o nariz os óculos 
+    cor-de-rosa de suas virginais ilusões. Luís Alves via bem
+    com os olhos da cara. Não era mau rapaz, mas tinha o seu
+    grão de egoísmo, e se não era incapaz de afeições, sabia
+    regê-las, moderá-las, e sobretudo guiá-las ao seu próprio
+    interesse.  Entre estes dois homens travara-se amizade
+    íntima, nascida para um na simpatia, para outro no costume.
+    Eram eles os naturais confidentes um do outro, com a
+    diferença que Luís Alves dava menos do que recebia, e, ainda
+    assim, nem tudo o que dava exprimia grande confiança.
+]=];
+
+var function random(handle, io_err) {
+    if( handle ) {
+        return function() {
+            if( ! handle ) { error("source is empty!", 2); }
+            var len = math.random(0, 1024);
+            var chunk = handle->read(len);
+            if( ! chunk ) { 
+                handle->close(); 
+                handle = null;
+            }
+            return chunk;
+        };
+    } else { return ltn12.source.empty(io_err || "unable to open file"); }
+}
+
+
+var function named(f) {
+    return f;
+}
+
+var what = null;
+var function transform(input, output, filter) {
+    var source = random(io.open(input, "rb"));
+    var sink = ltn12.sink.file(io.open(output, "wb"));
+    if( what ) { 
+        sink = ltn12.sink.chain(filter, sink);
+    } else {
+        source = ltn12.source.chain(source, filter);
+    }
+    //what = not what
+    ltn12.pump.all(source, sink);
+}
+
+var function encode_qptest(mode) {
+    var encode = mime.encode("quoted-printable", mode);
+    var split = mime.wrap("quoted-printable");
+    var chain = ltn12.filter.chain(encode, split);
+    transform(qptest, eqptest, chain);
+}
+
+var function compare_qptest() {
+io.write("testing qp encoding and wrap: ");
+    compare(qptest, dqptest);
+}
+
+var function decode_qptest() {
+    var decode = mime.decode("quoted-printable");
+    transform(eqptest, dqptest, decode);
+}
+
+var function create_qptest() {
+    var f, err = io.open(qptest, "wb");
+    if( ! f ) { fail(err); }
+    // try all characters
+    for( i = 0, 255 ) {
+        f->write(string.char(i));
+    }
+    // try all characters and different line sizes
+    for( i = 0, 255 ) {
+        for( j = 0, i ) {
+            f->write(string.char(i));
+        }
+        f->write("\r\n");
+    }
+    // test latin text
+    f->write(mao);
+    // force soft line breaks and treatment of space/tab in end of line
+    var tab;
+    f->write(string.gsub(mao, "(%s)", function(c) {
+        if( tab ) {
+            tab = null;
+            return "\t";
+        } else {
+            tab = 1;
+            return " ";
+        }
+    }));
+    // test crazy end of line conventions
+    var eol = { "\r\n", "\r", "\n", "\n\r" };
+    var which = 0;
+    f->write(string.gsub(mao, "(\n)", function(c) {
+        ++which    ;
+        if( which > 4 ) { which = 1; }
+        return eol[which];
+    }));
+    for( i = 1, 4 ) {
+        for( j = 1, 4 ) {
+            f->write(eol[i]);
+            f->write(eol[j]);
+        }
+    }
+    // try long spaced and tabbed lines
+    f->write("\r\n");
+    for( i = 0, 255 ) {
+        f->write(string.char(9));
+    }
+    f->write("\r\n");
+    for( i = 0, 255 ) {
+        f->write(' ');
+    }
+    f->write("\r\n");
+    for( i = 0, 255 ) {
+        f->write(string.char(9),' ');
+    }
+    f->write("\r\n");
+    for( i = 0, 255 ) {
+        f->write(' ',string.char(32));
+    }
+    f->write("\r\n");
+    
+    f->close();
+}
+
+var function cleanup_qptest() {
+    os.remove(qptest);
+    os.remove(eqptest);
+    os.remove(dqptest);
+}
+
+// create test file 
+var function create_b64test() {
+    var f = assert(io.open(b64test, "wb"));
+    var t = {};
+    for( j = 1, 100 ) {
+        for( i = 1, 100 ) {
+            t[i] = math.random(0, 255);
+        }
+        f->write(string.char(unpack(t)));
+    }
+    f->close();
+}
+
+var function encode_b64test() {
+    var e1 = mime.encode("base64");
+    var e2 = mime.encode("base64");
+    var e3 = mime.encode("base64");
+    var e4 = mime.encode("base64");
+    var sp4 = mime.wrap();
+    var sp3 = mime.wrap(59);
+    var sp2 = mime.wrap("base64", 30);
+    var sp1 = mime.wrap(27);
+    var chain = ltn12.filter.chain(e1, sp1, e2, sp2, e3, sp3, e4, sp4);
+    transform(b64test, eb64test, chain);
+}
+
+var function decode_b64test() {
+    var d1 = named(mime.decode("base64"), "d1");
+    var d2 = named(mime.decode("base64"), "d2");
+    var d3 = named(mime.decode("base64"), "d3");
+    var d4 = named(mime.decode("base64"), "d4");
+    var chain = named(ltn12.filter.chain(d1, d2, d3, d4), "chain");
+    transform(eb64test, db64test, chain);
+}
+
+var function cleanup_b64test() {
+    os.remove(b64test);
+    os.remove(eb64test);
+    os.remove(db64test);
+}
+
+var function compare_b64test() {
+io.write("testing b64 chained encode: ");
+    compare(b64test, db64test);
+}
+
+var function identity_test() {
+io.write("testing identity: ");
+    var chain = named(ltn12.filter.chain(
+        named(mime.encode("quoted-printable"), "1 eq"),
+        named(mime.encode("base64"), "2 eb"),
+        named(mime.decode("base64"), "3 db"),
+        named(mime.decode("quoted-printable"), "4 dq")
+    ), "chain");
+    transform(b64test, eb64test, chain);
+    compare(b64test, eb64test);
+    os.remove(eb64test);
+}
+
+
+var function padcheck(original, encoded) {
+    var e = (mime.b64(original));
+    var d = (mime.unb64(encoded));
+    if( e != encoded ) { fail("encoding failed"); }
+    if( d != original ) { fail("decoding failed"); }
+}
+
+var function chunkcheck(original, encoded) {
+    var len = string.len(original);
+    for( i = 0, len ) {
+        var a = string.sub(original, 1, i);
+        var b = string.sub(original, i+1);
+        var e, r = mime.b64(a, b);
+        var f = (mime.b64(r));
+        if( (e .. (f || "") != encoded) ) { fail(e .. (f || "")); }
+    }
+}
+
+var function padding_b64test() {
+io.write("testing b64 padding: ");
+    padcheck("a", "YQ==");
+    padcheck("ab", "YWI=");
+    padcheck("abc", "YWJj");
+    padcheck("abcd", "YWJjZA==");
+    padcheck("abcde", "YWJjZGU=");
+    padcheck("abcdef", "YWJjZGVm");
+    padcheck("abcdefg", "YWJjZGVmZw==");
+    padcheck("abcdefgh", "YWJjZGVmZ2g=");
+    padcheck("abcdefghi", "YWJjZGVmZ2hp");
+    padcheck("abcdefghij", "YWJjZGVmZ2hpag==");
+    chunkcheck("abcdefgh", "YWJjZGVmZ2g=");
+    chunkcheck("abcdefghi", "YWJjZGVmZ2hp");
+    chunkcheck("abcdefghij", "YWJjZGVmZ2hpag==");
+    print("ok");
+}
+
+var function test_b64lowlevel() {
+io.write("testing b64 low-level: ");
+    var a, b;
+    a, b = mime.b64("", "");
+    assert(a == "" && b == "");
+    a, b = mime.b64(null, "blablabla");
+    assert(a == null && b == null);
+    a, b = mime.b64("", null);
+    assert(a == null && b == null);
+    a, b = mime.unb64("", "");
+    assert(a == "" && b == "");
+    a, b = mime.unb64(null, "blablabla");
+    assert(a == null && b == null);
+    a, b = mime.unb64("", null);
+    assert(a == null && b == null);
+    var binary=string.char(0x00,0x44,0x1D,0x14,0x0F,0xF4,0xDA,0x11,0xA9,0x78,0x00,0x14,0x38,0x50,0x60,0xCE);
+    var encoded = mime.b64(binary);
+    var decoded=mime.unb64(encoded);
+    assert(binary == decoded);
+    print("ok");
+}
+
+var t = socket.gettime();
+
+create_b64test();
+identity_test();
+encode_b64test();
+decode_b64test();
+compare_b64test();
+cleanup_b64test();
+padding_b64test();
+test_b64lowlevel();
+
+create_qptest();
+encode_qptest();
+decode_qptest();
+compare_qptest();
+encode_qptest("binary");
+decode_qptest();
+compare_qptest();
+cleanup_qptest();
+
+
+print(string.format("done in %.2fs", socket.gettime() - t));

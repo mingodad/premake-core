@@ -1,0 +1,7 @@
+return {
+	"self-test.ljs",
+	"test_assertions.ljs",
+	"test_declare.ljs",
+	"test_helpers.ljs",
+	"test_runner.ljs"
+};

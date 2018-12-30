@@ -1,0 +1,394 @@
+//
+// _premake_main.ljs
+// Script-side entry point for the main program logic.
+// Copyright (c) 2002-2015 Jason Perkins and the Premake project
+//
+
+	var shorthelp     = "Type 'premake5 --help' for help";
+	var versionhelp   = "premake5 (Premake Build Script Generator) %s";
+	var startTime     = os.clock();
+
+// set a global.
+	_PREMAKE_STARTTIME = startTime;
+
+// Load the collection of core scripts, required for everything else to work
+
+	var modules = dofile("_modules.ljs");
+	var manifest = dofile("_manifest.ljs");
+	for( i = 1, #manifest ) {
+		dofile(manifest[i]);
+	}
+
+
+// Create namespaces for myself
+
+	var p = premake;
+	p.main = {};
+
+	var m = p.main;
+
+
+// Keep a table of modules that have been preloaded, and their associated
+// "should load" test functions.
+
+	m._preloaded = {};
+
+
+//-
+// Add a new module loader that knows how to use the Premake paths like
+// PREMAKE_PATH and the --scripts option, and follows the module/module.ljs
+// naming convention.
+//-
+
+	function m.installModuleLoader() {
+		if( ! os.ishost('windows') ) {
+			var premakeDir = path.getdirectory(_PREMAKE_COMMAND);
+			package.cpath = package.cpath .. ';' .. premakeDir .. '/?.so';
+		}
+		table.insert(package.searchers, 2, m.moduleLoader);
+	}
+
+	function m.moduleLoader(name) {
+		var dir = path.getdirectory(name);
+		var base = path.getname(name);
+
+		if( dir != "." ) {
+			dir = dir .. "/" .. base;
+		} else {
+			dir = base;
+		}
+
+		var full = dir .. "/" .. base .. ".ljs";
+
+		// list of paths where to look for the module
+		var paths = {
+			".modules/" .. full,
+			"modules/" .. full,
+			full,
+			name .. ".ljs"
+		};
+
+		// try to locate the module
+		for( _, p in ipairs(paths) ) {
+			var file = os.locate(p);
+			if( file ) {
+				var chunk, err = loadfile(file);
+				if( chunk ) {
+					return chunk;
+				}
+				if( err ) {
+					return "\n\tload error " .. err;
+				}
+			}
+		}
+
+		// didn't find the module in supported paths, try the embedded scripts
+		for( _, p in ipairs(paths) ) {
+			var chunk, err = loadfile("$/" .. p);
+			if( chunk ) {
+				return chunk;
+			}
+		}
+	}
+
+
+//-
+// Prepare the script environment; anything that should be done
+// before the system script gets a chance to run.
+//-
+
+	function m.prepareEnvironment() {
+		math.randomseed(os.time());
+		_PREMAKE_DIR = path.getdirectory(_PREMAKE_COMMAND);
+		p.path = p.path .. ";" .. _PREMAKE_DIR .. ";" .. _MAIN_SCRIPT_DIR;
+	}
+
+
+//-
+// Load the required core modules that are shipped as part of Premake and
+// expected to be present at startup. If a _preload.ljs script is present,
+// that script is run and the return value (a "should load" test) is cached
+// to be called after baking is complete. Otherwise the module's main script
+// is run immediately.
+//-
+
+	function m.preloadModules() {
+		for( i = 1, #modules ) {
+			var name = modules[i];
+			var preloader = name .. "/_preload.ljs";
+			preloader = os.locate("modules/" .. preloader) || os.locate(preloader);
+			if( preloader ) {
+				m._preloaded[name] = include(preloader);
+				if( ! m._preloaded[name] ) {
+					p.warn("module '%s' should return function from _preload.ljs", name);
+				}
+			} else {
+				require(name);
+			}
+		}
+	}
+
+
+//-
+// Look for and run the system-wide configuration script; make sure any
+// configuration scoping gets cleared before continuing.
+//-
+
+	function m.runSystemScript() {
+		dofileopt(_OPTIONS["systemscript"] || { "premake5-system.ljs", "premake-system.ljs" });
+		filter ({});
+	}
+
+
+//-
+// Look for a user project script, and set up the related global
+// variables if I can find one.
+//-
+
+	function m.locateUserScript() {
+		var defaults = { "premake5.ljs", "premake4.ljs" };
+		for( i = 1, #defaults ) {
+			if( os.isfile(defaults[i]) ) {
+				_MAIN_SCRIPT = defaults[i];
+				break;
+			}
+		}
+
+		if( ! _MAIN_SCRIPT ) {
+			_MAIN_SCRIPT = defaults[1];
+		}
+
+		if( _OPTIONS.file ) {
+			_MAIN_SCRIPT = _OPTIONS.file;
+		}
+
+		_MAIN_SCRIPT = path.getabsolute(_MAIN_SCRIPT);
+		_MAIN_SCRIPT_DIR = path.getdirectory(_MAIN_SCRIPT);
+	}
+
+
+//-
+// Set the action to be performed from the command line arguments.
+//-
+
+	function m.prepareAction() {
+		// The "next-gen" actions have now replaced their deprecated counterparts.
+		// Provide a warning for a little while before I remove them entirely.
+		if( _ACTION && _ACTION->endswith("ng") ) {
+			p.warnOnce(_ACTION, "'%s' has been deprecated; use '%s' instead", _ACTION, _ACTION->sub(1, -3));
+		}
+		p.action.set(_ACTION);
+
+		// Allow the action to initialize stuff.
+		var action = p.action.current();
+		if( action ) {
+			p.action.initialize(action.trigger);
+		}
+	}
+
+
+//-
+// If there is a project script available, run it to get the
+// project information, available options and actions, etc.
+//-
+
+	function m.runUserScript() {
+		if( os.isfile(_MAIN_SCRIPT) ) {
+			dofile(_MAIN_SCRIPT);
+		}
+	}
+
+
+//-
+// Run the interactive prompt, if requested.
+//-
+
+	function m.checkInteractive() {
+		if( _OPTIONS.interactive ) {
+			debug.prompt();
+		}
+	}
+
+
+//-
+// Validate and process the command line options and arguments.
+//-
+
+	function m.processCommandLine() {
+		// Process special options
+		if( (_OPTIONS["version"]) ) {
+			printf(versionhelp, _PREMAKE_VERSION);
+			os.exit(0);
+		}
+
+		if( (_OPTIONS["help"]) ) {
+			p.showhelp();
+			os.exit(1);
+		}
+
+		// Validate the command-line arguments. This has to happen after the
+		// script has run to allow for project-specific options
+		ok, err = p.option.validate(_OPTIONS);
+		if( ! ok ) {
+			print("Error: " .. err);
+			os.exit(1);
+		}
+
+		// If no further action is possible, show a short help message
+		if( ! _OPTIONS.interactive ) {
+			if( ! _ACTION ) {
+				print(shorthelp);
+				os.exit(1);
+			}
+
+			var action = p.action.current();
+			if( ! action ) {
+				print("Error: no such action '" .. _ACTION .. "'");
+				os.exit(1);
+			}
+
+			if( p.action.isConfigurable() && ! os.isfile(_MAIN_SCRIPT) ) {
+				print(string.format("No Premake script (%s) found!", path.getname(_MAIN_SCRIPT)));
+				os.exit(1);
+			}
+		}
+	}
+
+//-
+// Start up MobDebug and try to hook up with ZeroBrane
+//-
+
+	function m.tryHookDebugger() {
+
+		if( (_OPTIONS["debugger"]) ) {
+			print("Loading luasocket...");
+			require('luasocket');
+			print("Starting debugger...");
+			var mobdebug = require('mobdebug');
+			mobdebug.start();
+
+		}
+	}
+
+//-
+// Override point, for logic that should run before baking.
+//-
+
+	function m.preBake() {
+		if( p.action.isConfigurable() ) {
+			print("Building configurations...");
+		}
+	}
+
+
+//-
+// "Bake" the project information, preparing it for use by the action.
+//-
+
+	function m.bake() {
+		if( p.action.isConfigurable() ) {
+			p.oven.bake();
+		}
+	}
+
+
+//-
+// Override point, for logic that should run after baking but before
+// the configurations are validated.
+//-
+
+	function m.postBake() {
+		var function shouldLoad(func) {
+			for( wks in p.global.eachWorkspace() ) {
+				for( prj in p.workspace.eachproject(wks) ) {
+					for( cfg in p.project.eachconfig(prj) ) {
+						if( func(cfg) ) {
+							return true;
+						}
+					}
+				}
+			}
+		}
+
+		// any modules need to load to support this project?
+		for( module, func in pairs(m._preloaded) ) {
+			if( ! package.loaded[module] && shouldLoad(func) ) {
+				require(module);
+			}
+		}
+	}
+
+
+//-
+// Sanity check the current project setup.
+//-
+
+	function m.validate() {
+		if( p.action.isConfigurable() ) {
+			p.container.validate(p.api.rootContainer());
+		}
+	}
+
+
+//-
+// Override point, for logic that should run after validation and
+// before the action takes control.
+//-
+
+	function m.preAction() {
+		var action = p.action.current();
+		printf("Running action '%s'...", action.trigger);
+	}
+
+
+//-
+// Hand over control to the action.
+//-
+
+	function m.callAction() {
+		var action = p.action.current();
+		p.action.call(action.trigger);
+	}
+
+
+//-
+// Processing is complete.
+//-
+
+	function m.postAction() {
+		if( p.action.isConfigurable() ) {
+			var duration = math.floor((os.clock() - startTime) * 1000);
+			printf("Done (%dms).", duration);
+		}
+	}
+
+
+
+//
+// Script-side program entry point.
+//
+
+	m.elements = {
+		m.tryHookDebugger,
+		m.installModuleLoader,
+		m.locateUserScript,
+		m.prepareEnvironment,
+		m.preloadModules,
+		m.runSystemScript,
+		m.prepareAction,
+		m.runUserScript,
+		m.checkInteractive,
+		m.processCommandLine,
+		m.preBake,
+		m.bake,
+		m.postBake,
+		m.validate,
+		m.preAction,
+		m.callAction,
+		m.postAction,
+	};
+
+	function _premake_main() {
+		p.callArray(m.elements);
+		return 0;
+	}

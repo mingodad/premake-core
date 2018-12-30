@@ -1,0 +1,60 @@
+//
+// test_gmake2_target_rules.ljs
+// Validate the makefile target building rules.
+// (c) 2016-2017 Jason Perkins, Blizzard Entertainment and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("gmake2_target_rules");
+
+	p = premake;
+	var gmake2 = p.modules.gmake2;
+
+	var project = p.project;
+
+
+//
+// Setup
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare() {
+		var cfg = test.getconfig(prj, "Debug");
+		gmake2.cpp.allRules(cfg);
+	}
+
+
+//
+// Check the default, normal format of the rules.
+//
+
+	function suite.defaultRules() {
+		prepare();
+		test.capture ([=[
+all: $(TARGET)
+	@:
+		]=]);
+	}
+
+
+//
+// Check rules for an OS X Cocoa application.
+//
+
+	function suite.osxWindowedAppRules() {
+		system ("MacOSX");
+		kind ("WindowedApp");
+		prepare();
+		test.capture ([=[
+all: $(TARGET) $(dir $(TARGETDIR))PkgInfo $(dir $(TARGETDIR))Info.plist
+	@:
+
+$(dir $(TARGETDIR))PkgInfo:
+$(dir $(TARGETDIR))Info.plist:
+		]=]);
+	}

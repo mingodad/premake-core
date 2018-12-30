@@ -1,0 +1,361 @@
+//-
+// container.ljs
+// Implementation of configuration containers.
+// Copyright (c) 2014 Jason Perkins and the Premake project
+//-
+
+	var p = premake;
+	p.container = {};
+
+	var container = p.container;
+
+
+
+//-
+// Keep a master dictionary of container class, so they can be easily looked
+// up by name (technically you could look at premake["name"] but that is just
+// a coding convention and I don't want to count on it)
+//-
+
+	container.classes = {};
+
+
+
+//-
+// Define a new class of containers.
+//
+// @param name
+//    The name of the new container class. Used wherever the class needs to
+//    be shown to the end user in a readable way.
+// @param parent (optional)
+//    If this class of container is intended to be contained within another,
+//    the containing class object.
+// @param extraScopes (optional)
+//    Each container can hold fields scoped to itself (by putting the container's
+//    class name into its scope attribute), or any of the container's children.
+//    If a container can hold scopes other than these (i.e. "config"), it can
+//    provide a list of those scopes in this argument.
+// @return
+//    If successful, the new class descriptor object (a table). Otherwise,
+//    returns nil and an error message.
+//-
+
+	function container.newClass(name, parent, extraScopes) {
+		var class = p.configset.new(parent);
+		class.name = name;
+		class.pluralName = name->plural();
+		class.containedClasses = {};
+		class.extraScopes = extraScopes;
+
+		if( parent ) {
+			table.insert(parent.containedClasses, class);
+		}
+
+		container.classes[name] = class;
+		return class;
+	}
+
+
+
+//-
+// Create a new instance of a configuration container. This is just the
+// generic base implementation, each container class will define their
+// own version.
+//
+// @param parent
+//    The class of container being instantiated.
+// @param name
+//    The name for the new container instance.
+// @return
+//    A new container instance.
+//-
+
+	function container.new(class, name) {
+		var this = p.configset.new();
+		setmetatable(this, p.configset.metatable(this));
+
+		this.class = class;
+		this.name = name;
+		this.filename = name;
+		this.script = _SCRIPT;
+		this.basedir = os.getcwd();
+		this.external = false;
+
+		for( childClass in container.eachChildClass(class) ) {
+			this[childClass.pluralName] = {};
+		}
+
+		return this;
+	}
+
+
+
+//-
+// Add a new child to an existing container instance.
+//
+// @param self
+//    The container instance to hold the child.
+// @param child
+//    The child container instance.
+//-
+
+	function container.addChild(this, child) {
+		var children = this[child.class.pluralName];
+		table.insert(children, child);
+		children[child.name] = child;
+
+		child.parent = this;
+		child[this.class.name] = this;
+		if( this.class.alias ) {
+			child[this.class.alias] = this;
+		}
+	}
+
+
+
+//-
+// Process the contents of a container, which were populated by the project
+// script, in preparation for doing work on the results, such as exporting
+// project files.
+//-
+
+	function container.bake(this) {
+		if( this._isBaked ) {
+			return this;
+		}
+		this._isBaked = true;
+
+		var ctx = p.context.new(this);
+
+		for( key, value in pairs(this) ) {
+			ctx[key] = value;
+		}
+
+		var parent = this.parent;
+		if( parent ) {
+			ctx[parent.class.name] = parent;
+		}
+
+		for( class in container.eachChildClass(this.class) ) {
+			for( child in container.eachChild(this, class) ) {
+				child.parent = ctx;
+				child[this.class.name] = ctx;
+			}
+		}
+
+		if( type(this.class.bake) == "function" ) {
+			this.class.bake(ctx);
+		}
+
+		return ctx;
+	}
+
+
+	function container.bakeChildren(this) {
+		for( class in container.eachChildClass(this.class) ) {
+			var children = this[class.pluralName];
+			for( i = 1, #children ) {
+				var ctx = container.bake(children[i]);
+				children[i] = ctx;
+				children[ctx.name] = ctx;
+			}
+		}
+	}
+
+
+
+//-
+// Returns true if the container can hold any of the specified field scopes.
+//
+// @param class
+//    The container class to test.
+// @param scope
+//    A scope string (e.g. "project", "config") or an array of scope strings.
+// @return
+//    True if this container can hold any of the specified scopes.
+//-
+
+	function container.classCanContain(class, scope) {
+		if( type(scope) == "table" ) {
+			for( i = 1, #scope ) {
+				if( container.classCanContain(class, scope[i]) ) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// if I have child classes, check with them first, since scopes
+		// are usually specified for leaf nodes in the hierarchy
+		for( child in container.eachChildClass(class) ) {
+			if( (container.classCanContain(child, scope)) ) {
+				return true;
+			}
+		}
+
+		if( class.name == scope || class.alias == scope ) {
+			return true;
+		}
+
+		// is it in my extra scopes list?
+		if( class.extraScopes && table.contains(class.extraScopes, scope) ) {
+			return true;
+		}
+
+		return false;
+	}
+
+
+
+//-
+// Return true if a container class is or inherits from the
+// specified class.
+//
+// @param class
+//    The container class to be tested.
+// @param scope
+//    The name of the class to be checked against. If the container
+//    class matches this scope (i.e. class is a project and the
+//    scope is "project"), or if it is a parent object of it (i.e.
+//    class is a workspace and scope is "project"), then returns
+//    true.
+//-
+
+	function container.classIsA(class, scope) {
+		while( class ) {
+			if( class.name == scope || class.alias == scope ) {
+				return true;
+			}
+			class = class.parent;
+		}
+		return false;
+	}
+
+
+
+//-
+// Enumerate all of the registered child classes of a specific container class.
+//
+// @param class
+//    The container class to be enumerated.
+// @return
+//    An iterator function for the container's child classes.
+//-
+
+	function container.eachChildClass(class) {
+		var children = class.containedClasses;
+		var i = 0;
+		return function () {
+			++i    ;
+			if( i <= #children ) {
+				return children[i];
+			}
+		};
+	}
+
+
+
+//-
+// Enumerate all of the registered child instances of a specific container.
+//
+// @param self
+//    The container to be queried.
+// @param class
+//    The class of child containers to be enumerated.
+// @return
+//    An iterator function for the container's child classes.
+//-
+
+	function container.eachChild(this, class) {
+		var children = this[class.pluralName];
+		var i = 0;
+		return function () {
+			++i    ;
+			if( i <= #children ) {
+				return children[i];
+			}
+		};
+	}
+
+
+
+//-
+// Retrieve the child container with the specified class and name.
+//
+// @param self
+//    The container instance to query.
+// @param class
+//    The class of the child container to be fetched.
+// @param name
+//    The name of the child container to be fetched.
+// @return
+//    The child instance if it exists, nil otherwise.
+//-
+
+	function container.getChild(this, class, name) {
+		var children = this[class.pluralName];
+		return children[name];
+	}
+
+
+
+//-
+// Retrieve a container class object.
+//
+// @param name
+//    The name of the container class to retrieve.
+// @return
+//    The container class object if it exists, nil otherwise.
+//-
+
+	function container.getClass(name) {
+		return container.classes[name];
+	}
+
+
+
+//-
+// Determine if the container contains a child of the specified class which
+// meets the criteria of a testing function.
+//
+// @param self
+//    The container to be queried.
+// @param class
+//    The class of the child containers to be enumerated.
+// @param func
+//    A function that takes a child container as its only argument, and
+//    returns true if it meets the selection criteria for the call.
+// @return
+//    True if the test function returns true for any child.
+//-
+
+	function container.hasChild(this, class, func) {
+		for( child in container.eachChild(this, class) ) {
+			if( func(child) ) {
+				return true;
+			}
+		}
+	}
+
+
+
+//-
+// Call out to the container validation to make sure everything
+// is as it should be before handing off to the actions.
+//-
+
+	function container.validate(this) {
+		if( type(this.class.validate) == "function" ) {
+			this.class.validate(this);
+		}
+	}
+
+
+	function container.validateChildren(this) {
+		for( class in container.eachChildClass(this.class) ) {
+			var children = this[class.pluralName];
+			for( i = 1, #children ) {
+				container.validate(children[i]);
+			}
+		}
+	}

@@ -1,0 +1,72 @@
+//-
+// tests/tests_stress.ljs
+//
+// Stress test for Premake. Creates a large (tunable, see local variables
+// at start of file) number of projects, files, and configurations. Then
+// generates them all while profiling the result.
+//
+// Run it like normal, i.e. `premake5 --file=test_stress.ljs gmake`. The 
+// profile results will be placed at `build/profile.txt`.
+//
+// Copyright (c) 2009-2015 Jason Perkins and the Premake project
+//-
+
+//
+// Test parameters
+//
+
+	var numProjects  = 15;
+	var numFiles     = 100;
+	var numBuildCfgs = 6;
+	var numPlatforms = 6;
+
+	var prjKind      = "ConsoleApp";
+	var prjLanguage  = "C++";
+
+
+//
+// Generate the workspace and projects
+//
+
+	workspace ("MyWorkspace");
+		location ("build");
+
+	for( i = 1, numBuildCfgs ) {
+		configurations ( "BuildCfg" .. i );
+	}
+
+	for( i = 1, numPlatforms ) {
+		platforms ( "Platform" .. i );
+	}
+
+	for( i = 1, numProjects ) {
+		project ("Project" .. i);
+			location ("build");
+			kind     ( prjKind );
+			language ( prjLanguage );
+
+		for( j = 1, numFiles ) {
+			files ({ "file" .. j .. ".cpp" });
+		}
+	}
+
+
+//
+// Install profiling extensions
+// TODO: would be nice to build these into the core exe, and could be
+//       triggered with a flag, i.e. `premake5 --profile gmake`
+//
+
+	dofile("pepperfish_profiler.ljs");
+	profiler = newProfiler();
+	profiler->start();
+
+	premake.override(premake.main, "postAction", function(base) {
+		base();
+
+		profiler->stop();
+
+		var outfile = io.open("build/profile.txt", "w+" );
+		profiler->report(outfile);
+		outfile->close();		
+	});

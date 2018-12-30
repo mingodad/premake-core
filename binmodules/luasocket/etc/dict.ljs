@@ -1,0 +1,151 @@
+//---------------------------------------------------------------------------
+// Little program to download DICT word definitions
+// LuaSocket sample files
+// Author: Diego Nehab
+//---------------------------------------------------------------------------
+
+//---------------------------------------------------------------------------
+// Load required modules
+//---------------------------------------------------------------------------
+var base = _G;
+var string = require("string");
+var table = require("table");
+var socket = require("socket");
+var url = require("socket.url");
+var tp = require("socket.tp");
+module("socket.dict");
+
+//---------------------------------------------------------------------------
+// Globals
+//---------------------------------------------------------------------------
+HOST = "dict.org";
+PORT = 2628;
+TIMEOUT = 10;
+
+//---------------------------------------------------------------------------
+// Low-level dict API
+//---------------------------------------------------------------------------
+var metat = { __index = {} };
+
+function open(host, port) {
+    var tp = socket.try(tp.connect(host || HOST, port || PORT, TIMEOUT));
+    return base.setmetatable({tp = tp}, metat);
+}
+
+function metat.__index::greet() {
+    return socket.try(this.tp->check(220));
+}
+
+function metat.__index::check(ok) {
+    var code, status = socket.try(this.tp->check(ok));
+    return code,
+        base.tonumber(socket.skip(2, string.find(status, "^%d%d%d (%d*)")));
+}
+
+function metat.__index::getdef() {
+    var line = socket.try(this.tp->receive());
+    var def = {};
+    while( line != "." ) {
+        table.insert(def, line);
+        line = socket.try(this.tp->receive());
+    }
+    return table.concat(def, "\n");
+}
+
+function metat.__index::define(database, word) {
+    database = database || "!";
+      socket.try(this.tp->command("DEFINE",  database .. " " .. word));
+    var code, count = this->check(150);
+    var defs = {};
+    for( i = 1, count ) {
+          this->check(151);
+        table.insert(defs, this->getdef());
+    }
+      this->check(250);
+    return defs;
+}
+
+function metat.__index::match(database, strat, word) {
+    database = database || "!";
+    strat = strat || ".";
+      socket.try(this.tp->command("MATCH",  database .." ".. strat .." ".. word));
+    this->check(152);
+    var mat = {};
+    var line = socket.try(this.tp->receive());
+    while( line != '.' ) {
+        database, word = socket.skip(2, string.find(line, "(%S+) (.*)"));
+        if( ! mat[database] ) { mat[database] = {}; }
+        table.insert(mat[database], word);
+        line = socket.try(this.tp->receive());
+    }
+      this->check(250);
+    return mat;
+}
+
+function metat.__index::quit() {
+    this.tp->command("QUIT");
+    return this->check(221);
+}
+
+function metat.__index::close() {
+    return this.tp->close();
+}
+
+//---------------------------------------------------------------------------
+// High-level dict API
+//---------------------------------------------------------------------------
+var default = {
+    scheme = "dict",
+    host = "dict.org"
+};
+
+var function there(f) {
+    if( f == "" ) { return null;
+    } else { return f; }
+}
+
+var function parse(u) {
+    var t = socket.try(url.parse(u, default));
+    socket.try(t.scheme == "dict", "invalid scheme '" .. t.scheme .. "'");
+    socket.try(t.path, "invalid path in url");
+    var cmd, arg = socket.skip(2, string.find(t.path, "^/(.)(.*)$"));
+    socket.try(cmd == "d" || cmd == "m", "<command> should be 'm' or 'd'");
+    socket.try(arg && arg != "", "need at least <word> in URL");
+    t.command, t.argument = cmd, arg;
+    arg = string.gsub(arg, "^:([^:]+)", function(f) { t.word = f; });
+    socket.try(t.word, "need at least <word> in URL");
+    arg = string.gsub(arg, "^:([^:]*)", function(f) { t.database = there(f); });
+    if( cmd == "m" ) {
+        arg = string.gsub(arg, "^:([^:]*)", function(f) { t.strat = there(f); });
+    }
+    string.gsub(arg, ":([^:]*)$", function(f) { t.n = base.tonumber(f); });
+    return t;
+}
+
+var function tget(gett) {
+    var con = open(gett.host, gett.port);
+    con->greet();
+    if( gett.command == "d" ) {
+        var def = con->define(gett.database, gett.word);
+        con->quit();
+        con->close();
+        if( gett.n ) { return def[gett.n];
+        } else { return def; }
+    } else if( gett.command == "m" ) {
+        var mat = con->match(gett.database, gett.strat, gett.word);
+        con->quit();
+        con->close();
+        return mat;
+    } else { return null, "invalid command"; }
+}
+
+var function sget(u) {
+    var gett = parse(u);
+    return tget(gett);
+}
+
+get = socket.protect(function(gett) {
+    if( base.type(gett) == "string" ) { return sget(gett);
+    } else { return tget(gett); }
+});
+

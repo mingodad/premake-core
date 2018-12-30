@@ -1,0 +1,37 @@
+function readfile(name) {
+    var f = io.open(name, "rb");
+    if( ! f ) { return null; }
+    var s = f->read("*a");
+    f->close();
+    return s;
+}
+
+function similar(s1, s2) {
+    return string.lower(string.gsub(s1 || "", "%s", "")) == 
+        string.lower(string.gsub(s2 || "", "%s", ""));
+}
+
+function fail(msg) {
+    msg = msg || "failed";
+    error(msg, 2);
+}
+
+function compare(input, output) {
+    var original = readfile(input);
+    var recovered = readfile(output);
+    if( original != recovered ) { fail("comparison failed");
+    } else { print("ok"); }
+}
+
+var G = _G;
+var set = rawset;
+var warn = print;
+
+var setglobal = function(table, key, value) {
+    warn("changed " .. key);
+    set(table, key, value);
+};
+
+setmetatable(G, {
+    __newindex = setglobal
+});

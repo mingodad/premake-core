@@ -1,0 +1,318 @@
+//
+// d/actions/vcxproj.ljs
+// Generate a VisualD .visualdproj project.
+// Copyright (c) 2012-2015 Manu Evans and the Premake project
+//
+
+	var p = premake;
+
+	require ("vstudio");
+
+	p.modules.d.vc2010 = {};
+
+	var vc2010 = p.vstudio.vc2010;
+	var m = p.modules.d.vc2010;
+
+	m.elements = {};
+
+	var vstudio = p.vstudio;
+	var config = p.config;
+
+//
+// Patch the dCompile step into the project items
+//
+	p.override(vc2010.elements, "itemDefinitionGroup", function(oldfn, cfg) {
+		var items = oldfn(cfg);
+		if( cfg.kind != p.UTILITY ) {
+			table.insertafter(items, vc2010.clCompile, m.dCompile);
+		}
+		return items;
+	});
+
+//
+// Write the <DCompile> settings block.
+//
+
+	m.elements.dCompile = function(cfg) {
+		return {
+			m.dOptimization,
+			m.dImportPaths,
+			m.dStringImportPaths,
+			m.dVersionConstants,
+			m.dDebugConstants,
+			m.dCompilationModel,
+			m.dRuntime,
+			m.dCodeGeneration,
+			m.dMessages,
+			m.dDocumentation,
+		};
+	};
+
+	function m.dCompile(cfg) {
+		if( config.hasFile(cfg, path.isdfile) ) {
+			p.push('<DCompile>');
+			p.callArray(m.elements.dCompile, cfg);
+			p.pop('</DCompile>');
+		}
+	}
+
+//-
+// DCompile group
+//-
+	vc2010.categories.DCompile = {
+		name       = "DCompile",
+		extensions = { ".d" },
+		priority   = 3,
+
+		emitFiles = function(prj, group) {
+			var fileCfgFunc = function(fcfg, condition) {
+				if( fcfg ) {
+					return {
+						vc2010.excludedFromBuild,
+						m.dOptimization,
+						m.dImportPaths,
+						m.dStringImportPaths,
+						m.dVersionConstants,
+						m.dDebugConstants,
+						m.dCompilationModel,
+						m.dRuntime,
+						m.dCodeGeneration,
+						m.dMessages,
+						m.dDocumentation,
+					};
+				} else {
+					return {
+						vc2010.excludedFromBuild
+					};
+				}
+			};
+
+			vc2010.emitFiles(prj, group, "DCompile", {m.generatedFile}, fileCfgFunc);
+		},
+
+		emitFilter = function(prj, group) {
+			vc2010.filterGroup(prj, group, "DCompile");
+		}
+	};
+
+	function m.dOptimization(cfg, condition) {
+		var map = { Off="false", On="true", Debug="true", Full="true", Size="true", Speed="true" };
+		if( cfg.optimize ) {
+			vc2010.element('Optimizer', condition, map[cfg.optimize] || "false");
+		}
+	}
+
+
+	function m.dImportPaths(cfg, condition) {
+		if( cfg.importdirs && #cfg.importdirs > 0 ) {
+			var dirs = vstudio.path(cfg, cfg.importdirs);
+			if( #dirs > 0 ) {
+				vc2010.element("ImportPaths", condition, "%s;%%(ImportPaths)", table.concat(dirs, ";"));
+			}
+		}
+	}
+
+
+	function m.dStringImportPaths(cfg, condition) {
+		if( cfg.stringimportdirs && #cfg.stringimportdirs > 0 ) {
+			var dirs = vstudio.path(cfg, cfg.stringimportdirs);
+			if( #dirs > 0 ) {
+				vc2010.element("StringImportPaths", condition, "%s;%%(StringImportPaths)", table.concat(dirs, ";"));
+			}
+		}
+	}
+
+
+	function m.dVersionConstants(cfg, condition) {
+		if( cfg.versionconstants && #cfg.versionconstants > 0 ) {
+			var versionconstants = table.concat(cfg.versionconstants, ";");
+			vc2010.element("VersionIdentifiers", condition, versionconstants);
+		}
+	}
+
+
+	function m.dDebugConstants(cfg, condition) {
+		if( cfg.debugconstants && #cfg.debugconstants > 0 ) {
+			var debugconstants = table.concat(cfg.debugconstants, ";");
+			vc2010.element("DebugIdentifiers", condition, debugconstants);
+		}
+	}
+
+
+	function m.dCompilationModel(cfg, condition) {
+		if( cfg.compilationmodel && cfg.compilationmodel != "Default" ) {
+			vc2010.element("CompilationModel", condition, cfg.compilationmodel);
+		}
+	}
+
+
+	function m.dRuntime(cfg, condition) {
+		if( cfg.flags.OmitDefaultLibrary ) {
+			vc2010.element("CRuntimeLibrary", condition, "None");
+		} else {
+			var releaseruntime = ! config.isDebugBuild(cfg);
+			var staticruntime = true;
+			if( cfg.staticruntime == "Off" ) {
+				staticruntime = false;
+			}
+			if( cfg.runtime == "Debug" ) {
+				releaseruntime = false;
+			} else if( cfg.runtime == "Release" ) {
+				releaseruntime = true;
+			}
+			if( (cfg.staticruntime && cfg.staticruntime != "Default") || (cfg.runtime && cfg.runtime != "Default") ) {
+				if( staticruntime == true && releaseruntime == true ) {
+					vc2010.element("CRuntimeLibrary", condition, "MultiThreaded");
+				} else if( staticruntime == true && releaseruntime == false ) {
+					vc2010.element("CRuntimeLibrary", condition, "MultiThreadedDebug");
+				} else if( staticruntime == false && releaseruntime == true ) {
+					vc2010.element("CRuntimeLibrary", condition, "MultiThreadedDll");
+				} else if( staticruntime == false && releaseruntime == false ) {
+					vc2010.element("CRuntimeLibrary", condition, "MultiThreadedDebugDll");
+				}
+			}
+		}
+	}
+
+
+	function m.dCodeGeneration(cfg, condition) {
+		if( cfg.buildtarget ) {
+			var ObjectFileName = "";
+			if( cfg.buildtarget.basename ) {
+				if( cfg.buildtarget.prefix ) {
+					ObjectFileName = cfg.buildtarget.prefix;
+				}
+				ObjectFileName = ObjectFileName .. cfg.buildtarget.basename .. ".obj";
+			}
+			if( cfg.buildtarget.directory ) {
+				var outdir = vstudio.path(cfg, cfg.buildtarget.directory);
+				ObjectFileName = path.join(outdir, ObjectFileName);
+			}
+			vc2010.element("ObjectFileName", condition, ObjectFileName);
+		}
+
+		if( cfg.optimize ) {
+			if( config.isOptimizedBuild(cfg) ) {
+				vc2010.element("Optimizer", condition, "true");
+			}
+		}
+		if( cfg.flags.Profile ) {
+			vc2010.element("Profile", condition, "true");
+		}
+		if( cfg.flags.CodeCoverage ) {
+			vc2010.element("Coverage", condition, "true");
+		}
+		if( cfg.flags.UnitTest ) {
+			vc2010.element("Unittest", condition, "true");
+		}
+		if( cfg.inlining ) {
+			var types = {
+				Default = "true",
+				Disabled = "false",
+				Explicit = "true",
+				Auto = "true",
+			};
+			vc2010.element("Inliner", condition, types[cfg.inlining]);
+		}
+		if( cfg.boundscheck && cfg.boundscheck != "Default" ) {
+			var types = {
+				Off = "Off",
+				SafeOnly = "SafeOnly",
+				On = "On",
+			};
+			vc2010.element("BoundsCheck", condition, types[cfg.boundscheck]);
+		}
+//		if cfg.debugcode then
+//			local types = {
+//				DebugFull = "Debug",
+//				DebugLight = "Default",
+//				Release = "Release",
+//			}
+//			vc2010.element("DebugCode", condition, types[cfg.debugcode])
+//		end
+		if( cfg.symbols ) {
+			if( cfg.symbols == p.Off ) {
+				vc2010.element("DebugInfo", condition, "None");
+			} else if( cfg.symbols != "Default" ) {
+				vc2010.element("DebugInfo", condition, (cfg.flags.SymbolsLikeC ? "VS" : "Mago"));
+			}
+		}
+		if( cfg.flags.ProfileGC ) {
+			vc2010.element("ProfileGC", condition, "true");
+		}
+		if( cfg.flags.StackFrame ) {
+			vc2010.element("StackFrame", condition, "true");
+		}
+		if( cfg.flags.StackStomp ) {
+			vc2010.element("StackStomp", condition, "true");
+		}
+		if( cfg.flags.AllTemplateInst ) {
+			vc2010.element("AllInst", condition, "true");
+		}
+		if( cfg.flags.BetterC ) {
+			vc2010.element("BetterC", condition, "true");
+		}
+		if( cfg.flags.Main ) {
+			vc2010.element("Main", condition, "true");
+		}
+		if( cfg.flags.PerformSyntaxCheckOnly ) {
+			vc2010.element("PerformSyntaxCheckOnly", condition, "true");
+		}
+	}
+
+
+	function m.dMessages(cfg, condition) {
+		if( cfg.warnings == p.OFF ) {
+			vc2010.element("Warnings", condition, "None");
+		} else if( cfg.warnings && cfg.warnings != "Default" ) {
+			vc2010.element("Warnings", condition, (cfg.flags.FatalCompileWarnings ? "Error" : "Info"));
+		}
+		if( cfg.deprecatedfeatures && cfg.deprecatedfeatures != "Default" ) {
+			var types = {
+				Error = "Error",
+				Warn = "Info",
+				Allow = "Allow",
+			};
+			vc2010.element("Deprecations", condition, types[cfg.deprecatedfeatures]);
+		}
+		if( cfg.flags.ShowCommandLine ) {
+			vc2010.element("ShowCommandLine", condition, "true");
+		}
+		if( cfg.flags.Verbose ) {
+			vc2010.element("Verbose", condition, "true");
+		}
+		if( cfg.flags.ShowTLS ) {
+			vc2010.element("ShowTLS", condition, "true");
+		}
+		if( cfg.flags.ShowGC ) {
+			vc2010.element("ShowGC", condition, "true");
+		}
+		if( cfg.flags.IgnorePragma ) {
+			vc2010.element("IgnorePragma", condition, "true");
+		}
+		if( cfg.flags.ShowDependencies ) {
+			vc2010.element("ShowDependencies", condition, "true");
+		}
+	}
+
+
+	function m.dDocumentation(cfg, condition) {
+		if( cfg.docdir ) {
+			vc2010.element("DocDir", condition, cfg.docdir);
+		}
+		if( cfg.docname ) {
+			vc2010.element("DocFile", condition, cfg.docname);
+		}
+		if( cfg.dependenciesfile ) {
+			vc2010.element("DepFile", condition, cfg.dependenciesfile);
+		}
+		if( cfg.headerdir ) {
+			vc2010.element("HeaderDir", condition, cfg.headerdir);
+		}
+		if( cfg.headername ) {
+			vc2010.element("HeaderFile", condition, cfg.headername);
+		}
+		if( cfg.jsonfile ) {
+			vc2010.element("JSONFile", condition, cfg.jsonfile);
+		}
+	}

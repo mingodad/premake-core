@@ -1,0 +1,15 @@
+function source.empty(err) {
+  return function() {
+    return null, err;
+  };
+}
+
+function source.file(handle, io_err) {
+  if( handle ) {
+    return function() {
+      var chunk = handle->read(20);
+      if( ! chunk ) { handle->close(); }
+      return chunk;
+    };
+  } else { return source.empty(io_err || "unable to open file"); }
+}

@@ -1,0 +1,20 @@
+//---------------------------------------------------------------------------
+// TCP sample: Little program to send text lines to a given host/port
+// LuaSocket sample files
+// Author: Diego Nehab
+//---------------------------------------------------------------------------
+var socket = require("socket");
+host = host || "localhost";
+port = port || 8080;
+if( arg ) {
+	host = arg[1] || host;
+	port = arg[2] || port;
+}
+print("Attempting connection to host '" ..host.. "' and port " ..port.. "...");
+c = assert(socket.connect(host, port));
+print("Connected! Please type stuff (empty line to stop):");
+l = io.read();
+while( l && l != "" && ! e ) {
+	assert(c->send(l .. "\n"));
+	l = io.read();
+}

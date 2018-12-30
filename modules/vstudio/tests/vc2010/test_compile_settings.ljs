@@ -1,0 +1,1358 @@
+//
+// tests/actions/vstudio/vc2010/test_compile_settings.ljs
+// Validate compiler settings in Visual Studio 2010 C/C++ projects.
+// Copyright (c) 2011-2013 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("vstudio_vs2010_compile_settings");
+	var vc2010 = p.vstudio.vc2010;
+	var project = p.project;
+
+
+//
+// Setup
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		p.action.set("vs2010");
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare(platform) {
+		var cfg = test.getconfig(prj, "Debug", platform);
+		vc2010.clCompile(cfg);
+	}
+
+
+//
+// Check the basic element structure with default settings.
+//-
+
+	function suite.defaultSettings() {
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+
+//-
+// Test precompiled header handling; the header should be treated as
+// a plain string value, with no path manipulation applied, since it
+// needs to match the value of the #include statement used in the
+// project code.
+//-
+
+	function suite.usePrecompiledHeaders_onPrecompiledHeaders() {
+		location ("build");
+		pchheader ("include/afxwin.h");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>Use</PrecompiledHeader>
+	<PrecompiledHeaderFile>include/afxwin.h</PrecompiledHeaderFile>
+		]=]);
+	}
+
+
+//-
+// The NoPCH flag should override any other PCH settings.
+//-
+
+	function suite.noPrecompiledHeaders_onNoPCH() {
+		pchheader ("afxwin.h");
+		flags ("NoPCH");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+		]=]);
+	}
+
+
+//
+// If extra warnings is specified, pump up the volume.
+//
+
+	function suite.warningLevel_onExtraWarnings() {
+		warnings ("Extra");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level4</WarningLevel>
+		]=]);
+	}
+
+//
+// If the warnings are disabled, mute all warnings.
+//
+
+	function suite.warningLevel_onNoWarnings() {
+		warnings ("Off");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>TurnOffAllWarnings</WarningLevel>
+		]=]);
+	}
+
+//
+// If warnings are turned off, the fatal warnings flags should
+// not be generated.
+//
+
+	function suite.warningLevel_onNoWarningsOverOtherWarningsFlags() {
+		flags ({ "FatalWarnings" });
+		warnings ("Off");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>TurnOffAllWarnings</WarningLevel>
+		]=]);
+	}
+
+//
+// Disable specific warnings.
+//
+
+	function suite.disableSpecificWarnings() {
+		disablewarnings ({ "disable" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DisableSpecificWarnings>disable;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+		]=]);
+	}
+
+//
+// Specific warnings as errors.
+//
+
+	function suite.specificWarningsAsErrors() {
+		fatalwarnings ({ "fatal" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<TreatSpecificWarningsAsErrors>fatal;%(TreatSpecificWarningsAsErrors)</TreatSpecificWarningsAsErrors>
+		]=]);
+	}
+
+//
+// Check the optimization flags.
+//
+
+	function suite.optimization_onOptimize() {
+		optimize ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Full</Optimization>
+	<FunctionLevelLinking>true</FunctionLevelLinking>
+	<IntrinsicFunctions>true</IntrinsicFunctions>
+	<MinimalRebuild>false</MinimalRebuild>
+	<StringPooling>true</StringPooling>
+		]=]);
+	}
+
+	function suite.optimization_onOptimizeSize() {
+		optimize ("Size");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>MinSpace</Optimization>
+	<FunctionLevelLinking>true</FunctionLevelLinking>
+	<IntrinsicFunctions>true</IntrinsicFunctions>
+	<MinimalRebuild>false</MinimalRebuild>
+	<StringPooling>true</StringPooling>
+		]=]);
+	}
+
+	function suite.optimization_onOptimizeSpeed() {
+		optimize ("Speed");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>MaxSpeed</Optimization>
+	<FunctionLevelLinking>true</FunctionLevelLinking>
+	<IntrinsicFunctions>true</IntrinsicFunctions>
+	<MinimalRebuild>false</MinimalRebuild>
+	<StringPooling>true</StringPooling>
+		]=]);
+	}
+
+	function suite.optimization_onOptimizeFull() {
+		optimize ("Full");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Full</Optimization>
+	<FunctionLevelLinking>true</FunctionLevelLinking>
+	<IntrinsicFunctions>true</IntrinsicFunctions>
+	<MinimalRebuild>false</MinimalRebuild>
+	<StringPooling>true</StringPooling>
+		]=]);
+	}
+
+	function suite.optimization_onOptimizeOff() {
+		optimize ("Off");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.optimization_onOptimizeDebug() {
+		optimize ("Debug");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+
+//
+// If defines are specified, the <PreprocessorDefinitions> element should be added.
+//
+
+	function suite.preprocessorDefinitions_onDefines() {
+		defines ({ "DEBUG", "_DEBUG" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<PreprocessorDefinitions>DEBUG;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+		]=]);
+	}
+
+
+//
+//	If defines are specified with escapable characters, they should be escaped.
+//
+
+	function suite.preprocessorDefinitions_onDefinesWithEscapeCharacters() {
+		p.escaper(p.vstudio.vs2010.esc);
+		defines ({ "&", "<", ">" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<PreprocessorDefinitions>&amp;;&lt;;&gt;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+		]=]);
+		p.escaper(null);
+	}
+
+
+//
+// If undefines are specified, the <UndefinePreprocessorDefinitions> element should be added.
+//
+
+	function suite.preprocessorDefinitions_onUnDefines() {
+		undefines ({ "DEBUG", "_DEBUG" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<UndefinePreprocessorDefinitions>DEBUG;_DEBUG;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
+		]=]);
+	}
+
+
+//
+// If build options are specified, the <AdditionalOptions> element should be specified.
+//
+
+	function suite.additionalOptions_onBuildOptions() {
+		buildoptions ({ "/xyz", "/abc" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<AdditionalOptions>/xyz /abc %(AdditionalOptions)</AdditionalOptions>
+		]=]);
+	}
+
+
+//
+// If include directories are specified, the <AdditionalIncludeDirectories> should be added.
+//
+
+	function suite.additionalIncludeDirs_onIncludeDirs() {
+		includedirs ({ "include/lua", "include/zlib" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<AdditionalIncludeDirectories>include\lua;include\zlib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+		]=]);
+	}
+
+
+
+//
+// Ensure macros are not truncated (see issue #63)
+//
+
+
+	function suite.additionalIncludeDirs_onIncludeDirs_with_vs_macros() {
+		includedirs ({ "$(Macro1)/foo/bar/$(Macro2)/baz" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<AdditionalIncludeDirectories>$(Macro1)\foo\bar\$(Macro2)\baz;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+		]=]);
+	}
+
+
+//
+// If include directories are specified, the <AdditionalUsingDirectories> should be added.
+//
+
+	function suite.additionalUsingDirs_onUsingDirs() {
+		usingdirs ({ "include/lua", "include/zlib" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<AdditionalUsingDirectories>include\lua;include\zlib;%(AdditionalUsingDirectories)</AdditionalUsingDirectories>
+		]=]);
+	}
+
+//
+// Turn off minimal rebuilds if the NoMinimalRebuild flag is set.
+//
+
+	function suite.minimalRebuild_onNoMinimalRebuild() {
+		flags ("NoMinimalRebuild");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<MinimalRebuild>false</MinimalRebuild>
+		]=]);
+	}
+
+//
+// Can't minimal rebuild with the C7 debugging format.
+//
+
+	function suite.minimalRebuild_onC7() {
+		debugformat ("C7");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<MinimalRebuild>false</MinimalRebuild>
+		]=]);
+	}
+
+
+//
+// If staticruntime is specified, add the <RuntimeLibrary> element.
+//
+
+	function suite.runtimeLibrary_onDynamicRuntime() {
+		staticruntime ("Off");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+		]=]);
+	}
+
+	function suite.runtimeLibrary_onStaticRuntime() {
+		staticruntime ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+		]=]);
+	}
+
+	function suite.runtimeLibrary_onDynamicRuntimeAndSymbols() {
+		staticruntime ("Off");
+		symbols ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+	<Optimization>Disabled</Optimization>
+	<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+		]=]);
+	}
+
+	function suite.runtimeLibrary_onStaticRuntimeAndSymbols() {
+		staticruntime ("On");
+		symbols ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+	<Optimization>Disabled</Optimization>
+	<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+		]=]);
+	}
+
+
+//
+// Add <TreatWarningAsError> if FatalWarnings flag is set.
+//
+
+	function suite.treatWarningsAsError_onFatalWarnings() {
+		flags ({ "FatalCompileWarnings" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<TreatWarningAsError>true</TreatWarningAsError>
+		]=]);
+	}
+
+
+//
+// Check the handling of the Symbols flag.
+//
+
+	function suite.onDefaultSymbols() {
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+
+//
+// Check handling of the explicitly disabling symbols.
+// Note: VS2013 and older have a bug with setting
+// DebugInformationFormat to None. The workaround
+// is to leave the field blank.
+//
+	function suite.onNoSymbols() {
+		symbols ('Off');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat></DebugInformationFormat>
+	<Optimization>Disabled</Optimization>
+		]=]);
+	}
+
+
+//
+// VS2015 and newer can use DebugInformationFormat None.
+//
+	function suite.onNoSymbolsVS2015() {
+		symbols ('Off');
+		p.action.set("vs2015");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>None</DebugInformationFormat>
+	<Optimization>Disabled</Optimization>
+		]=]);
+	}
+
+	function suite.onSymbols() {
+		symbols ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+
+//
+// Check the handling of the C7 debug information format.
+//
+
+	function suite.onC7DebugFormat() {
+		symbols ("On");
+		debugformat ("c7");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>OldStyle</DebugInformationFormat>
+	<Optimization>Disabled</Optimization>
+		]=]);
+	}
+
+
+//
+// Verify character handling.
+//
+
+	function suite.wchar_onNative() {
+		flags ("NativeWChar");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
+		]=]);
+	}
+
+	function suite.wchar_onNoNative() {
+		flags ("NoNativeWChar");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<TreatWChar_tAsBuiltInType>false</TreatWChar_tAsBuiltInType>
+		]=]);
+	}
+
+
+//
+// Check exception handling and RTTI.
+//
+
+	function suite.exceptions_onNoExceptions() {
+		exceptionhandling ("Off");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<PreprocessorDefinitions>_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+	<Optimization>Disabled</Optimization>
+	<ExceptionHandling>false</ExceptionHandling>
+		]=]);
+	}
+
+
+	function suite.exceptions_onSEH() {
+		exceptionhandling ("SEH");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<ExceptionHandling>Async</ExceptionHandling>
+		]=]);
+	}
+
+	function suite.runtimeTypeInfo_onNoRTTI() {
+		rtti ("Off");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<RuntimeTypeInfo>false</RuntimeTypeInfo>
+		]=]);
+	}
+
+	function suite.runtimeTypeInfo_onNoBufferSecurityCheck() {
+		flags ("NoBufferSecurityCheck");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<BufferSecurityCheck>false</BufferSecurityCheck>
+		]=]);
+	}
+
+
+//
+// On Win32 builds, use the Edit-and-Continue debug information format.
+//
+
+	function suite.debugFormat_onWin32() {
+		symbols ("On");
+		architecture ("x86");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+		]=]);
+	}
+
+
+//
+// Edit-and-Continue is not support on 64-bit builds.
+//
+
+	function suite.debugFormat_onWin64() {
+		symbols ("On");
+		architecture ("x86_64");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+		]=]);
+	}
+
+
+//
+// Check the handling of the editandcontinue flag.
+//
+
+	function suite.debugFormat_onEditAndContinueOff() {
+		symbols ("On");
+		editandcontinue ("Off");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+		]=]);
+	}
+
+//
+// Check the handling of the editandcontinue flag.
+//
+
+	function suite.debugFormat_onFastLinkBuild() {
+		symbols ("FastLink");
+		editandcontinue ("Off");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+		]=]);
+	}
+
+
+//
+// Edit-and-Continue is not supported for optimized builds.
+//
+
+	function suite.debugFormat_onOptimizedBuild() {
+		symbols ("On");
+		optimize ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+		]=]);
+	}
+
+
+
+//
+// Edit-and-Continue is not supported for Managed builds.
+//
+
+	function suite.debugFormat_onManagedCode() {
+		symbols ("On");
+		clr ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+		]=]);
+	}
+
+
+//
+// Check handling of forced includes.
+//
+
+	function suite.forcedIncludeFiles() {
+		forceincludes ({ "stdafx.h", "include/sys.h" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<ForcedIncludeFiles>stdafx.h;include\sys.h</ForcedIncludeFiles>
+		]=]);
+	}
+
+	function suite.forcedUsingFiles() {
+		forceusings ({ "stdafx.h", "include/sys.h" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<ForcedUsingFiles>stdafx.h;include\sys.h</ForcedUsingFiles>
+		]=]);
+	}
+
+
+//
+// Check handling of the NoRuntimeChecks flag.
+//
+
+	function suite.onNoRuntimeChecks() {
+		flags ({ "NoRuntimeChecks" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<BasicRuntimeChecks>Default</BasicRuntimeChecks>
+		]=]);
+	}
+
+
+//
+// Check handling of the EnableMultiProcessorCompile flag.
+//
+
+	function suite.onMultiProcessorCompile() {
+		flags ({ "MultiProcessorCompile" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<MinimalRebuild>false</MinimalRebuild>
+	<MultiProcessorCompilation>true</MultiProcessorCompilation>
+		]=]);
+	}
+
+
+//
+// Check handling of the `runtime` API; should override the
+// default behavior of linking the debug runtime when symbols are
+// enabled with no optimizations.
+//
+
+	function suite.releaseRuntime_onReleaseRuntime() {
+		runtime ("Release");
+		symbols ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+	<Optimization>Disabled</Optimization>
+	<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+		]=]);
+	}
+
+	function suite.releaseRuntime_onDynamicAndReleaseRuntime() {
+		runtime ("Release");
+		staticruntime ("Off");
+		symbols ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+	<Optimization>Disabled</Optimization>
+	<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+		]=]);
+	}
+
+	function suite.releaseRuntime_onStaticAndReleaseRuntime() {
+		runtime ("Release");
+		staticruntime ("On");
+		symbols ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+	<Optimization>Disabled</Optimization>
+	<RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+		]=]);
+	}
+
+
+//
+// Check handling of the OmitDefaultLibrary flag.
+//
+
+	function suite.onOmitDefaultLibrary() {
+		flags ({ "OmitDefaultLibrary" });
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<OmitDefaultLibName>true</OmitDefaultLibName>
+		]=]);
+	}
+
+
+//
+// Check handling of the stringpooling api
+//
+	function suite.onStringPoolingOff() {
+		stringpooling ('Off');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<StringPooling>false</StringPooling>
+		]=]);
+	}
+
+	function suite.onStringPoolingOn() {
+		stringpooling ('On');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<StringPooling>true</StringPooling>
+		]=]);
+	}
+
+	function suite.onStringPoolingNotSpecified() {
+		optimize ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Full</Optimization>
+	<FunctionLevelLinking>true</FunctionLevelLinking>
+	<IntrinsicFunctions>true</IntrinsicFunctions>
+	<MinimalRebuild>false</MinimalRebuild>
+	<StringPooling>true</StringPooling>
+		]=]);
+	}
+
+
+
+//
+// Check handling of the floatingpointexceptions api
+//
+	function suite.onFloatingPointExceptionsOff() {
+		floatingpointexceptions ('Off');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<FloatingPointExceptions>false</FloatingPointExceptions>
+		]=]);
+	}
+
+	function suite.onFloatingPointExceptionsOn() {
+		floatingpointexceptions ('On');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<FloatingPointExceptions>true</FloatingPointExceptions>
+		]=]);
+	}
+
+	function suite.onFloatingPointExceptionsNotSpecified() {
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+
+
+//
+// Check handling of the functionlevellinking api
+//
+	function suite.onFunctionLevelLinkingOff() {
+		functionlevellinking ('Off');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<FunctionLevelLinking>false</FunctionLevelLinking>
+		]=]);
+	}
+
+	function suite.onFunctionLevelLinkingOn() {
+		functionlevellinking ('On');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<FunctionLevelLinking>true</FunctionLevelLinking>
+		]=]);
+	}
+
+	function suite.onFunctionLevelLinkingNotSpecified() {
+		optimize ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Full</Optimization>
+	<FunctionLevelLinking>true</FunctionLevelLinking>
+		]=]);
+	}
+
+
+
+//
+// Check handling of the intrinsics api
+//
+	function suite.onIntrinsicsOff() {
+		intrinsics ('Off');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<IntrinsicFunctions>false</IntrinsicFunctions>
+		]=]);
+	}
+
+	function suite.onIntrinsicsOn() {
+		intrinsics ('On');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<IntrinsicFunctions>true</IntrinsicFunctions>
+		]=]);
+	}
+
+	function suite.onIntrinsicsNotSpecified() {
+		optimize ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Full</Optimization>
+	<FunctionLevelLinking>true</FunctionLevelLinking>
+	<IntrinsicFunctions>true</IntrinsicFunctions>
+	<MinimalRebuild>false</MinimalRebuild>
+	<StringPooling>true</StringPooling>
+		]=]);
+	}
+
+
+
+//
+// Check handling of the language api
+//
+	function suite.onLanguageC() {
+		language ('C');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.onLanguageCpp() {
+		language ('C++');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+
+//
+// Check handling of the compileAs api
+//
+	function suite.onCompileAsC() {
+		compileas ('C');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<CompileAs>CompileAsC</CompileAs>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.onCompileAsCpp() {
+		compileas ('C++');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<CompileAs>CompileAsCpp</CompileAs>
+</ClCompile>
+		]=]);
+	}
+
+
+//
+// Check handling of the C++14 & C++17 api
+//
+
+	function suite.onLanguage_Cpp14_VS2010() {
+		cppdialect ('C++14');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.onLanguage_Cpp14_VS2015() {
+		p.action.set("vs2015");
+
+		cppdialect ('C++14');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<AdditionalOptions>/std:c++14 %(AdditionalOptions)</AdditionalOptions>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.onLanguage_Cpp14_VS2017() {
+		p.action.set("vs2017");
+
+		cppdialect ('C++14');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<LanguageStandard>stdcpp14</LanguageStandard>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.onLanguage_Cpp17_VS2010() {
+		cppdialect ('C++17');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.onLanguage_Cpp17_VS2015() {
+		p.action.set("vs2015");
+
+		cppdialect ('C++17');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<AdditionalOptions>/std:c++latest %(AdditionalOptions)</AdditionalOptions>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.onLanguage_Cpp17_VS2017() {
+		p.action.set("vs2017");
+
+		cppdialect ('C++17');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<LanguageStandard>stdcpp17</LanguageStandard>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.onLanguage_CppLatest_VS2010() {
+		cppdialect ('C++latest');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.onLanguage_CppLatest_VS2015() {
+		p.action.set("vs2015");
+
+		cppdialect ('C++latest');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<AdditionalOptions>/std:c++latest %(AdditionalOptions)</AdditionalOptions>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.onLanguage_CppLatest_VS2017() {
+		p.action.set("vs2017");
+
+		cppdialect ('C++latest');
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<LanguageStandard>stdcpplatest</LanguageStandard>
+</ClCompile>
+		]=]);
+	}
+
+//
+// Check StaticLib SymbolsPath
+//
+
+	function suite.generateProgramDataBaseFileName_onStaticLib() {
+		kind ("StaticLib");
+
+		symbols ("On");
+		symbolspath ("$(IntDir)$(TargetName).pdb");
+
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+	<Optimization>Disabled</Optimization>
+	<ProgramDataBaseFileName>$(IntDir)$(TargetName).pdb</ProgramDataBaseFileName>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.generateNotProgramDataBaseFileName_onSharedLib() {
+		kind ("SharedLib");
+
+		symbols ("On");
+		symbolspath ("$(IntDir)$(TargetName).pdb");
+
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+//
+// Check UnsignedChar.
+//
+
+	function suite.unsignedChar_On() {
+		unsignedchar ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<AdditionalOptions>/J %(AdditionalOptions)</AdditionalOptions>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.unsignedChar_Off() {
+		unsignedchar ("Off");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+//
+// Check StructMemberAlignment
+//
+
+	function suite.structMemberAlignment() {
+		structmemberalign(1);
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<StructMemberAlignment>1Byte</StructMemberAlignment>
+</ClCompile>
+		]=]);
+	}
+
+//
+// Check OmitFramePointer
+//
+
+	function suite.omitFramePointer_Default() {
+		omitframepointer ("Default");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.omitFramePointer_On() {
+		omitframepointer ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<OmitFramePointers>true</OmitFramePointers>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.omitFramePointer_Off() {
+		omitframepointer ("Off");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<OmitFramePointers>false</OmitFramePointers>
+</ClCompile>
+		]=]);
+	}
+
+	function suite.omitFramePointer_DeprecationFlag() {
+		flags ("NoFramePointer");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<WarningLevel>Level3</WarningLevel>
+	<Optimization>Disabled</Optimization>
+	<OmitFramePointers>true</OmitFramePointers>
+</ClCompile>
+		]=]);
+	}

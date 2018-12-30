@@ -1,0 +1,10 @@
+return {
+	"_preload.ljs",
+	"d.ljs",
+	"actions/gmake.ljs",
+	"actions/vcxproj.ljs",
+	"actions/visuald.ljs",
+	"tools/dmd.ljs",
+	"tools/gdc.ljs",
+	"tools/ldc.ljs",
+};

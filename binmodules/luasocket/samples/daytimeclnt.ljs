@@ -1,0 +1,22 @@
+//---------------------------------------------------------------------------
+// UDP sample: daytime protocol client
+// LuaSocket sample files
+// Author: Diego Nehab
+//---------------------------------------------------------------------------
+var socket = require("socket");
+host = host || "127.0.0.1";
+port = port || 13;
+if( arg ) {
+    host = arg[1] || host;
+    port = arg[2] || port;
+}
+host = socket.dns.toip(host);
+udp = socket.udp();
+print("Using host '" ..host.. "' and port " ..port.. "...");
+udp->setpeername(host, port);
+udp->settimeout(3);
+sent, err = udp->send("anything");
+if( err ) { print(err); os.exit(); }
+dgram, err = udp->receive();
+if( ! dgram ) { print(err); os.exit(); }
+io.write(dgram);

@@ -1,0 +1,182 @@
+//-
+// vs2010_rules_props.ljs
+// Generate a Visual Studio 201x custom rules properties file.
+// Copyright (c) Jason Perkins and the Premake project
+//
+
+
+	var p = premake;
+	p.vstudio.vs2010.rules = {};
+	p.vstudio.vs2010.rules.props = {};
+
+	var m = p.vstudio.vs2010.rules.props;
+	m.elements = {};
+
+
+//-
+// Entry point; generate the root <Project> element.
+//-
+
+	m.elements.project = function(r) {
+		return {
+			p.vstudio.projectElement,
+			m.targetsGroup,
+			m.dependsOnGroup,
+			m.ruleGroup,
+		};
+	};
+
+	function m.generate(r) {
+		p.xmlUtf8();
+		p.callArray(m.elements.project, r);
+		p.pop();
+		p.out('</Project>');
+	}
+
+
+
+//-
+// Generate the targets property group element.
+//-
+
+	m.elements.targetsGroup = function(r) {
+		return {
+			m.beforeTargets,
+			m.afterTargets,
+		};
+	};
+
+	function m.targetsGroup(r) {
+		p.w('<PropertyGroup');
+		p.push('  Condition="\'$(%sBeforeTargets)\' == \'\' and \'$(%sAfterTargets)\' == \'\' and \'$(ConfigurationType)\' != \'Makefile\'">',
+			r.name, r.name);
+		p.callArray(m.elements.targetsGroup, r);
+		p.pop('</PropertyGroup>');
+	}
+
+
+
+//-
+// Generate the dependencies property group element.
+//-
+
+	m.elements.dependsOnGroup = function(r) {
+		return {
+			m.dependsOn,
+		};
+	};
+
+	function m.dependsOnGroup(r) {
+		p.push('<PropertyGroup>');
+		p.callArray(m.elements.dependsOnGroup, r);
+		p.pop('</PropertyGroup>');
+	}
+
+
+
+//-
+// Generate the rule itemm group element.
+//-
+
+	m.elements.ruleGroup = function(r) {
+		return {
+			m.propertyDefaults,
+			m.commandLineTemplates,
+			m.executionDescription,
+			m.additionalDependencies,
+		};
+	};
+
+	function m.ruleGroup(r) {
+		p.push('<ItemDefinitionGroup>');
+		p.push('<%s>', r.name);
+		p.callArray(m.elements.ruleGroup, r);
+		p.pop('</%s>', r.name);
+		p.pop('</ItemDefinitionGroup>');
+	}
+
+
+
+//-
+// Output the default values for all of the property definitions.
+//-
+
+	function m.propertyDefaults(r) {
+		var defs = r.propertydefinition;
+		for( i = 1, #defs ) {
+			var def = defs[i];
+			var value = def.value;
+			if( value ) {
+				if( def.kind == "path" ) {
+					value = path.translate(value);
+				}
+				p.w('<%s>%s</%s>', def.name, value, def.name);
+			}
+		}
+	}
+
+
+
+//-
+// Implementations of individual elements.
+//-
+
+	function m.additionalDependencies(r) {
+		var deps = table.concat(r.builddependencies, ";");
+		p.x('<AdditionalDependencies>%s</AdditionalDependencies>', deps);
+	}
+
+
+
+	function m.afterTargets(r) {
+		p.w('<%sAfterTargets>CustomBuild</%sAfterTargets>', r.name, r.name);
+	}
+
+
+
+	function m.beforeTargets(r) {
+		p.w('<%sBeforeTargets>Midl</%sBeforeTargets>', r.name, r.name);
+	}
+
+
+
+	function m.commandLineTemplates(r) {
+		// create shadow context.
+		var env = p.rule.createEnvironment(r, "[%s]");
+		var ctx = p.context.extent(r, env);
+
+		// now use the shadow context to detoken.
+		var buildcommands = ctx.buildcommands;
+
+		// write out the result.
+		if( buildcommands && #buildcommands > 0 ) {
+			var cmds = os.translateCommands(buildcommands, p.WINDOWS);
+			cmds = table.concat(cmds, p.eol());
+			p.x('<CommandLineTemplate>%s</CommandLineTemplate>', cmds);
+		}
+	}
+
+
+
+	function m.dependsOn(r) {
+		p.w('<%sDependsOn', r.name);
+		p.w('  Condition="\'$(ConfigurationType)\' != \'Makefile\'">_SelectedFiles;$(%sDependsOn)</%sDependsOn>',
+			r.name, r.name, r.name);
+	}
+
+
+
+	function m.executionDescription(r) {
+		// create shadow context.
+		var env = p.rule.createEnvironment(r, "%%(%s)");
+		var ctx = p.context.extent(r, env);
+
+		// now use the shadow context to detoken.
+		var buildmessage = ctx.buildmessage;
+
+		// write out the result.
+		if( buildmessage && #buildmessage > 0 ) {
+			p.x('<ExecutionDescription>%s</ExecutionDescription>', buildmessage);
+		}
+	}
+

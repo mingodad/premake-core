@@ -1,0 +1,6 @@
+return {
+	"_preload.ljs",
+	"codelite.ljs",
+	"codelite_workspace.ljs",
+	"codelite_project.ljs",
+};

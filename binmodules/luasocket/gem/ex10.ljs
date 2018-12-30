@@ -1,0 +1,17 @@
+function pump.step(src, snk) {
+  var chunk, src_err = src();
+  var ret, snk_err = snk(chunk, src_err);
+  if( chunk && ret ) { return 1;
+  } else { return null, src_err || snk_err; }
+}
+
+function pump.all(src, snk, step) {
+    step = step || pump.step;
+    while( true ) {
+        var ret, err = step(src, snk);
+        if( ! ret ) {
+            if( err ) { return null, err;
+            } else { return 1; }
+        }
+    }
+}

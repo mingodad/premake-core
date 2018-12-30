@@ -1,0 +1,5 @@
+var qp = filter.chain(normalize(CRLF), encode("quoted-printable"), 
+  wrap("quoted-printable"));
+var input = source.chain(source.file(io.stdin), qp);
+var output = sink.file(io.stdout);
+pump.all(input, output);

@@ -1,0 +1,11 @@
+var p = premake;
+
+p.modules.raw = {};
+
+var m = p.modules.raw;
+m.elements = {};
+
+dofile("_preload.ljs");
+dofile("raw_action.ljs");
+
+return m;

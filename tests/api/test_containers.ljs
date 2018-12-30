@@ -1,0 +1,94 @@
+//
+// tests/api/test_containers.ljs
+// Tests the API's workspace() and project() container definitions.
+// Copyright (c) 2013-2014 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("api_containers");
+	var api = p.api;
+
+
+//
+// Setup and teardown
+//
+
+	var wks;
+
+	function suite.setup() {
+		wks = workspace("MyWorkspace");
+	}
+
+
+//
+// The first time a name is encountered, a new container should be created.
+//
+
+	function suite.workspace_createsOnFirstUse() {
+		test.isnotnil(p.global.getWorkspace("MyWorkspace"));
+	}
+
+	function suite.project_createsOnFirstUse() {
+		project("MyProject");
+		test.isnotnil(test.getproject(wks, "MyProject"));
+	}
+
+
+//
+// When a container is created, it should become the active scope.
+//
+
+	function suite.workspace_setsActiveScope() {
+		test.issame(api.scope.workspace, wks);
+	}
+
+	function suite.project_setsActiveScope() {
+		var prj = project("MyProject");
+		test.issame(api.scope.project, prj);
+	}
+
+
+//
+// When container function is called with no arguments, that should
+// become the current scope.
+//
+
+	function suite.workspace_setsActiveScope_onNoArgs() {
+		project("MyProject");
+		group("MyGroup");
+		workspace();
+		test.issame(wks, api.scope.workspace);
+		test.isnil(api.scope.project);
+		test.isnil(api.scope.group);
+	}
+
+	function suite.project_setsActiveScope_onNoArgs() {
+		var prj = project("MyProject");
+		group("MyGroup");
+		project();
+		test.issame(prj, api.scope.project);
+	}
+
+
+//
+// The "*" name should activate the parent scope.
+//
+
+	function suite.workspace_onStar() {
+		project("MyProject");
+		group("MyGroup");
+		filter("Debug");
+		workspace("*");
+		test.isnil(api.scope.workspace);
+		test.isnil(api.scope.project);
+		test.isnil(api.scope.group);
+	}
+
+	function suite.project_onStar() {
+		project("MyProject");
+		group("MyGroup");
+		filter("Debug");
+		project ("*");
+		test.issame(wks, api.scope.workspace);
+		test.isnil(api.scope.project);
+	}

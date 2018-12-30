@@ -1,0 +1,602 @@
+//
+// table.ljs
+// Additions to Lua's built-in table functions.
+// Copyright (c) 2002-2013 Jason Perkins and the Premake project
+//
+
+
+//
+// Make a copy of the indexed elements of the table.
+//
+
+	function table.arraycopy(object) {
+		var result = {};
+		for( i, value in ipairs(object) ) {
+			result[i] = value;
+		}
+		return result;
+	}
+
+
+//
+// Returns true if the table contains the specified value.
+//
+
+	function table.contains(t, value) {
+		for( _,v in pairs(t) ) {
+			if( (v == value) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+
+//
+// Make a shallow copy of a table
+//
+
+	function table.shallowcopy(object) {
+		var copy = {};
+		for( k, v in pairs(object) ) {
+			copy[k] = v;
+		}
+		return copy;
+	}
+
+
+//
+// Make a complete copy of a table, including any child tables it contains.
+//
+
+	function table.deepcopy(object) {
+		// keep track of already seen objects to avoid loops
+		var seen = {};
+
+		var function copy(object) {
+			if( type(object) != "table" ) {
+				return object;
+			} else if( seen[object] ) {
+				return seen[object];
+			}
+
+			var clone = {};
+			seen[object] = clone;
+			for( key, value in pairs(object) ) {
+				clone[key] = copy(value);
+			}
+
+			setmetatable(clone, getmetatable(object));
+			return clone;
+		}
+
+		return copy(object);
+	}
+
+
+//
+// Enumerates an array of objects and returns a new table containing
+// only the value of one particular field.
+//
+
+	function table.extract(arr, fname) {
+		var result = { };
+		for( _,v in ipairs(arr) ) {
+			table.insert(result, v[fname]);
+		}
+		return result;
+	}
+
+
+//
+// Enumerates an array of objects and returns a new table containing
+// only the values satisfying the given predicate.
+//
+
+	function table.filter(arr, fn) {
+		var result = { };
+		table.foreachi(arr, function(val) {
+			if( fn(val) ) {
+				table.insert(result, val);
+			}
+		});
+		return result;
+	}
+
+
+//
+// Flattens a hierarchy of tables into a single array containing all
+// of the values.
+//
+
+	function table.flatten(arr) {
+		var result = {};
+
+		var function flatten(arr) {
+			var n = #arr;
+			for( i = 1, n ) {
+				var v = arr[i];
+				if( type(v) == "table" ) {
+					flatten(v);
+				} else if( v ) {
+					table.insert(result, v);
+				}
+			}
+		}
+
+		flatten(arr);
+		return result;
+	}
+
+
+//
+// Walk the elements of an array and call the specified function
+// for each non-nil element. This works around a "feature" of the
+// ipairs() function that stops iteration at the first nil.
+//
+// @param arr
+//    The array to iterate.
+// @param func
+//    The function to call. The value (not the index) will be passed
+//    as the only argument.
+//
+
+	function table.foreachi(arr, func) {
+		if( arr ) {
+			var n = #arr;
+			for( i = 1, n ) {
+				var v = arr[i];
+				if( v ) {
+					func(v, i);
+				}
+			}
+		}
+	}
+
+
+//
+// Merge two lists into an array of objects, containing pairs
+// of values, one from each list.
+//
+
+	function table.fold(list1, list2) {
+		var result = {};
+		for( _, item1 in ipairs(list1 || {}) ) {
+			if( list2 && #list2 > 0 ) {
+				for( _, item2 in ipairs(list2) ) {
+					table.insert(result, { item1, item2 });
+				}
+			} else {
+				table.insert(result, { item1 });
+			}
+		}
+		return result;
+	}
+
+
+//
+// Merges an array of items into a string.
+//
+
+	function table.implode(arr, before, after, between) {
+		var result = "";
+		for( _,v in ipairs(arr) ) {
+			if( (result != "" && between) ) {
+				result = result .. between;
+			}
+			result = result .. before .. v .. after;
+		}
+		return result;
+	}
+
+
+
+//
+// Looks for an object within an array. Returns its index if found,
+// or nil if the object could not be found.
+//
+
+	function table.indexof(tbl, obj) {
+		for( k, v in ipairs(tbl) ) {
+			if( v == obj ) {
+				return k;
+			}
+		}
+	}
+
+
+//
+// Looks for an object within a table. Returns the key if found,
+// or nil if the object could not be found.
+//
+
+	function table.findKeyByValue(tbl, obj) {
+		for( k, v in pairs(tbl) ) {
+			if( v == obj ) {
+				return k;
+			}
+		}
+	}
+
+
+//-
+// Insert a new value into a table in the position after the specified
+// existing value. If the specified value does not exist in the table,
+// the new value is appended to the end of the table.
+//
+// @param tbl
+//    The table in which to insert.
+// @param after
+//    The existing value to insert after.
+// @param value
+//    The new value to insert.
+//
+
+	function table.insertafter(tbl, after, value) {
+		var i = table.indexof(tbl, after);
+		if( i ) {
+			table.insert(tbl, i + 1, value);
+		} else {
+			table.insert(tbl, value);
+		}
+	}
+
+
+//
+// Inserts a value or array of values into a table. If the value is
+// itself a table, its contents are enumerated and added instead. So
+// these inputs give these outputs:
+//
+//   "x" -> { "x" }
+//   { "x", "y" } -> { "x", "y" }
+//   { "x", { "y" }} -> { "x", "y" }
+//
+
+	function table.insertflat(tbl, values) {
+		if( values == null ) {
+			return;
+		} else if( type(values) == "table" ) {
+			for( _, value in ipairs(values) ) {
+				table.insertflat(tbl, value);
+			}
+		} else {
+			table.insert(tbl, values);
+		}
+		return tbl;
+	}
+
+
+//
+// Inserts a value into a table as both a list item and a key-value pair.
+// Useful for set operations. Returns false if the value already exists, true otherwise.
+//
+
+	function table.insertkeyed(tbl, pos, value) {
+		if( value == null ) {
+			value = pos;
+			pos = #tbl + 1;
+		}
+
+		if( tbl[value] != null ) {
+			return false;
+		}
+
+		table.insert(tbl, pos, value);
+		tbl[value] = value;
+		return true;
+	}
+
+
+//
+// Inserts a value into a table in sorted order. Assumes that the
+// table is already sorted according to the sort function. If fn is
+// nil, the table is sorted according to the < operator.
+//
+
+	function table.insertsorted(tbl, value, fn) {
+		if( value == null ) {
+			return;
+		} else {
+			fn = fn || function(a, b) { return a < b; };
+
+			var minindex = 1;
+			var maxindex = #tbl + 1;
+			while( minindex < maxindex ) {
+				var index = minindex + ((maxindex - minindex) >> 1);
+				var test = tbl[index];
+				if( fn(value, test) ) {
+					maxindex = index;
+				} else {
+					minindex = index + 1;
+					if( ! fn(test, value) ) {
+						break;
+					}
+				}
+			}
+
+			table.insert(tbl, minindex, value);
+		}
+
+		return tbl;
+	}
+
+
+//
+// Returns true if the table is empty, and contains no indexed or keyed values.
+//
+
+	function table.isempty(t) {
+		return next(t) == null;
+	}
+
+
+//
+// Adds the values from one array to the end of another and
+// returns the result.
+//
+
+	function table.join(...) {
+		var result = { };
+		var arg = {...};
+		for( _,t in ipairs(arg) ) {
+			if( type(t) == "table" ) {
+				for( _,v in ipairs(t) ) {
+					table.insert(result, v);
+				}
+			} else {
+				table.insert(result, t);
+			}
+		}
+		return result;
+	}
+
+
+//
+// Return a list of all keys used in a table.
+//
+
+	function table.keys(tbl) {
+		var keys = {};
+		for( k, _ in pairs(tbl) ) {
+			table.insert(keys, k);
+		}
+		return keys;
+	}
+
+
+//
+// Adds the key-value associations from one table into another
+// and returns the resulting merged table.
+//
+
+	function table.merge(...) {
+		var result = {};
+		var arg = {...};
+		for( _,t in ipairs(arg) ) {
+
+			if( type(t) == "table" ) {
+				for( k,v in pairs(t) ) {
+					if( type(result[k]) == "table" && type(v) == "table" ) {
+						result[k] = table.merge(result[k], v);
+					} else {
+						result[k] = v;
+					}
+				}
+
+			} else {
+				error("invalid value");
+			}
+		}
+
+		return result;
+	}
+
+
+//-
+// Replace all instances of `value` with `replacement` in an array. Array
+// elements are modified in place.
+//
+// @param value
+//    The value to be replaced.
+// @param replacement
+//    The new value.
+//-
+
+	function table.replace(this, value, replacement) {
+		for( i = 1, #this ) {
+			if( this[i] == value ) {
+				this[i] = replacement;
+			}
+		}
+	}
+
+
+//
+// Translates the values contained in array, using the specified
+// translation table, and returns the results in a new array.
+//
+
+	function table.translate(arr, translation) {
+		if( ! translation ) { return {}; }
+
+		var result = {};
+		for( i = 1, #arr ) {
+			var tvalue;
+			if( type(translation) == "function" ) {
+				tvalue = translation(arr[i]);
+			} else {
+				tvalue = translation[arr[i]];
+			}
+			if( (tvalue) ) {
+				table.insert(result, tvalue);
+			}
+		}
+		return result;
+	}
+
+
+//
+// Dumps a table to a string
+//
+	function table.tostring(tab, recurse, indent) {
+		var res = '';
+
+		if( ! indent ) {
+			indent = 0;
+		}
+
+		var format_value = function(k, v, i) {
+			formatting = string.rep("\t", i);
+
+			if( k ) {
+				if( type(k) == "table" ) {
+					k = '[table]';
+				}
+				formatting = formatting .. k .. ": ";
+			}
+
+			if( ! v ) {
+				return formatting .. '(nil)';
+			} else if( type(v) == "table" ) {
+				if( recurse && recurse > 0 ) {
+					return formatting .. '\n' .. table.tostring(v, recurse-1, i+1);
+				} else {
+					return formatting .. "<table>";
+				}
+			} else if( type(v) == "function" ) {
+				return formatting .. tostring(v);
+			} else if( type(v) == "userdata" ) {
+				return formatting .. "<userdata>";
+			} else if( type(v) == "boolean" ) {
+				if( v ) {
+					return formatting .. 'true';
+				} else {
+					return formatting .. 'false';
+				}
+			} else {
+				return formatting .. v;
+			}
+		};
+
+		if( type(tab) == "table" ) {
+			var first = true;
+
+			// add the meta table.
+			var mt = getmetatable(tab);
+			if( mt ) {
+				res = res .. format_value('__mt', mt, indent);
+				first = false;
+			}
+
+			// add all values.
+			for( k, v in pairs(tab) ) {
+				if( ! first ) {
+					res = res .. '\n';
+				}
+
+				res = res .. format_value(k, v, indent);
+				first = false;
+			}
+		} else {
+			res = res .. format_value(null, tab, indent);
+		}
+
+		return res;
+	}
+
+
+//
+// Returns a copy of a list with all duplicate elements removed.
+//
+	function table.unique(tab) {
+		var elems = { };
+		var result = { };
+		table.foreachi(tab, function(elem) {
+			if( ! elems[elem] ) {
+				table.insert(result, elem);
+				elems[elem] = true;
+			}
+		});
+
+		return result;
+	}
+
+//
+// Filters a table for empty entries. primarly useful for lists of string.
+//
+	function table.filterempty(dirs) {
+		return table.translate(dirs, function(val) {
+			if( val && #val > 0 ) {
+				return val;
+			} else {
+				return null;
+			}
+		});
+	}
+
+
+//
+// Compares two tables.
+//
+	function table.equals(a, b) {
+		for( k, v in pairs(a) ) {
+			if( b[k] != v ) {
+				return false;
+			}
+		}
+		for( k, v in pairs(b) ) {
+			if( a[k] != v ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+
+//
+// Enumerate a table sorted by its keys.
+//
+	function spairs(t) {
+		// collect the keys
+		var keys = {};
+		for( k in pairs(t) ) {
+			table.insert(keys, k);
+		}
+		table.sort(keys);
+
+		// return the iterator function
+		var i = 0;
+		return function() {
+			++i    ;
+			if( keys[i] ) {
+				return keys[i], t[keys[i]];
+			}
+		};
+	}
+
+
+//
+// Intersect two arrays and return a new array
+//
+	function table.intersect(a, b) {
+		var result = {};
+		for( _, v in ipairs(b) ) {
+			if( table.indexof(a, v) ) {
+				table.insert(result, v);
+			}
+		}
+		return result;
+	}
+
+//
+// The difference of A and B is the set containing those elements that are in A but not in B
+//
+	function table.difference(a, b) {
+		var result = {};
+		for( _, v in ipairs(a) ) {
+			if( ! table.indexof(b, v) ) {
+				table.insert(result, v);
+			}
+		}
+		return result;
+	}

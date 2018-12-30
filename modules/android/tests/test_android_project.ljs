@@ -1,0 +1,114 @@
+	var p = premake;
+	var suite = test.declare("test_android_project");
+	var vc2010 = p.vstudio.vc2010;
+
+
+//
+// Setup
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		p.action.set("vs2015");
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare() {
+		system ("android");
+		var cfg = test.getconfig(prj, "Debug", platform);
+		vc2010.clCompile(cfg);
+	}
+
+	function suite.noOptions() {
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<Optimization>Disabled</Optimization>
+</ClCompile>]=]);
+	}
+
+	function suite.rttiOff() {
+		rtti ("Off");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<Optimization>Disabled</Optimization>
+	<ExceptionHandling>Enabled</ExceptionHandling>
+</ClCompile>]=]);
+	}
+
+	function suite.rttiOn() {
+		rtti ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<Optimization>Disabled</Optimization>
+	<ExceptionHandling>Enabled</ExceptionHandling>
+	<RuntimeTypeInfo>true</RuntimeTypeInfo>
+]=]);
+	}
+
+	function suite.exceptionHandlingOff() {
+		exceptionhandling ("Off");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<Optimization>Disabled</Optimization>
+</ClCompile>]=]);
+	}
+
+	function suite.exceptionHandlingOn() {
+		exceptionhandling ("On");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<Optimization>Disabled</Optimization>
+	<ExceptionHandling>Enabled</ExceptionHandling>
+	<RuntimeTypeInfo>true</RuntimeTypeInfo>
+]=]);
+	}
+
+	function suite.cppdialect_cpp11() {
+		cppdialect ("C++11");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<Optimization>Disabled</Optimization>
+	<ExceptionHandling>Enabled</ExceptionHandling>
+	<RuntimeTypeInfo>true</RuntimeTypeInfo>
+	<CppLanguageStandard>c++11</CppLanguageStandard>
+]=]);
+	}
+
+	function suite.cppdialect_cpp14() {
+		cppdialect ("C++14");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<Optimization>Disabled</Optimization>
+	<ExceptionHandling>Enabled</ExceptionHandling>
+	<RuntimeTypeInfo>true</RuntimeTypeInfo>
+	<CppLanguageStandard>c++1y</CppLanguageStandard>
+]=]);
+	}
+
+	function suite.cppdialect_cpp17() {
+		cppdialect ("C++17");
+		prepare();
+		test.capture ([=[
+<ClCompile>
+	<PrecompiledHeader>NotUsing</PrecompiledHeader>
+	<Optimization>Disabled</Optimization>
+	<ExceptionHandling>Enabled</ExceptionHandling>
+	<RuntimeTypeInfo>true</RuntimeTypeInfo>
+	<AdditionalOptions>-std=c++1z %(AdditionalOptions)</AdditionalOptions>
+]=]);
+	}

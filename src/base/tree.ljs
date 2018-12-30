@@ -1,0 +1,329 @@
+//
+// tree.ljs
+// Functions for working with the source code tree.
+// Copyright (c) 2009-2013 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	p.tree = {};
+	var tree = p.tree;
+
+
+//
+// Create a new tree.
+//
+// @param n
+//    The name of the tree, applied to the root node (optional).
+//
+
+	function tree.new(n) {
+		var t = {
+			name = n,
+			children = {}
+		};
+		return t;
+	}
+
+
+//
+// Add a new node to the tree, or returns the current node if it already exists.
+//
+// @param tr
+//    The tree to contain the new node.
+// @param p
+//    The path of the new node.
+// @param extraFields
+//    A table containing key-value pairs to be added to any new nodes.
+// @returns
+//    The new tree node.
+//
+
+	function tree.add(tr, p, extraFields) {
+		// Special case "." refers to the current node
+		if( p == "." || p == "/" ) {
+			return tr;
+		}
+
+		// Look for the immediate parent for this new node, creating it if necessary.
+		// Recurses to create as much of the tree as necessary.
+		var parentnode = tree.add(tr, path.getdirectory(p), extraFields);
+
+		// Create the child if necessary
+		var childname = path.getname(p);
+		var childnode = parentnode.children[childname];
+		if( ! childnode || childnode.path != p ) {
+			childnode = tree.insert(parentnode, tree.new(childname));
+			childnode.path = p;
+			if( extraFields ) {
+				for( k,v in pairs(extraFields) ) {
+					childnode[k] = v;
+				}
+			}
+		}
+
+		return childnode;
+	}
+
+
+//
+// Insert one tree into another.
+//
+// @param parent
+//    The parent tree, to contain the child.
+// @param child
+//    The child tree, to be inserted.
+//
+
+	function tree.insert(parent, child) {
+		table.insert(parent.children, child);
+		if( child.name ) {
+			parent.children[child.name] = child;
+		}
+		child.parent = parent;
+		return child;
+	}
+
+
+//
+// Gets the node's relative path from it's parent. If the parent does not have
+// a path set (it is the root or other container node) returns the full node path.
+//
+// @param node
+//    The node to query.
+//
+
+	function tree.getlocalpath(node) {
+		if( node.parent.path ) {
+			return node.name;
+		} else if( node.cfg ) {
+			return node.cfg.name;
+		} else {
+			return node.path;
+		}
+	}
+
+
+//
+// Determines if the tree contains any branch nodes, or only leaves.
+//
+// @param tr
+//    The root node of the tree to query.
+// @return
+//    True if a node below the root contains children, false otherwise.
+//
+
+	function tree.hasbranches(tr) {
+		var n = #tr.children;
+		if( n > 0 ) {
+			for( i = 1, n ) {
+				if( #tr.children[i].children > 0 ) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+
+//
+// Determines if one node is a parent if another.
+//
+// @param n
+//    The node being tested for parentage.
+// @param child
+//    The child node being testing against.
+// @return
+//    True if n is a parent of child.
+//
+
+	function tree.isparent(n, child) {
+		var p = child.parent;
+		while( p ) {
+			if( p == n ) {
+				return true;
+			}
+			p = p.parent;
+		}
+		return false;
+	}
+
+
+//
+// Remove a node from a tree.
+//
+// @param node
+//    The node to remove.
+//
+
+	function tree.remove(node) {
+		var children = node.parent.children;
+		for( i = 1, #children ) {
+			if( children[i] == node ) {
+				table.remove(children, i);
+			}
+		}
+		node.children = {};
+	}
+
+
+//
+// Sort the nodes of a tree in-place.
+//
+// @param tr
+//    The tree to sort.
+// @param fn
+//    An optional comparator function.
+//
+
+	function tree.sort(tr, fn) {
+		if( ! fn ) {
+			fn = function(a,b) { return a.name < b.name; };
+		}
+		tree.traverse(tr, {
+			onnode = function(node) {
+				table.sort(node.children, fn);
+			}
+		}, true);
+	}
+
+
+//
+// Traverse a tree.
+//
+// @param t
+//    The tree to traverse.
+// @param fn
+//    A collection of callback functions, which may contain any or all of the
+//    following entries. Entries are called in this order.
+//
+//    onnode         - called on each node encountered
+//    onbranchenter  - called on branches, before processing children
+//    onbranch       - called only on branch nodes
+//    onleaf         - called only on leaf nodes
+//    onbranchexit   - called on branches, after processing children
+//
+//    Callbacks receive two arguments: the node being processed, and the
+//    current traversal depth.
+//
+// @param includeroot
+//    True to include the root node in the traversal, otherwise it will be skipped.
+// @param initialdepth
+//    An optional starting value for the traversal depth; defaults to zero.
+//
+
+	function tree.traverse(t, fn, includeroot, initialdepth) {
+
+		// forward declare my handlers, which call each other
+		var donode, dochildren;
+
+		// process an individual node
+		donode = function(node, fn, depth) {
+			if( node.isremoved ) {
+				return;
+			}
+
+			if( fn.onnode ) {
+				fn.onnode(node, depth);
+			}
+
+			if( #node.children > 0 ) {
+				if( fn.onbranchenter ) {
+					fn.onbranchenter(node, depth);
+				}
+				if( fn.onbranch ) {
+					fn.onbranch(node, depth);
+				}
+				dochildren(node, fn, depth + 1);
+				if( fn.onbranchexit ) {
+					fn.onbranchexit(node, depth);
+				}
+			} else {
+				if( fn.onleaf ) {
+					fn.onleaf(node, depth);
+				}
+			}
+		};
+
+		// this goofy iterator allows nodes to be removed during the traversal
+		dochildren = function(parent, fn, depth) {
+			var i = 1;
+			while( i <= #parent.children ) {
+				var node = parent.children[i];
+				donode(node, fn, depth);
+				if( node == parent.children[i] ) {
+					++i    ;
+				}
+			}
+		};
+
+		// set a default initial traversal depth, if one wasn't set
+		if( ! initialdepth ) {
+			initialdepth = 0;
+		}
+
+		if( includeroot ) {
+			donode(t, fn, initialdepth);
+		} else {
+			dochildren(t, fn, initialdepth);
+		}
+	}
+
+
+//
+// Starting at the top of the tree, remove nodes that contain only a single
+// item until I hit a node that has multiple items. This is used to remove
+// superfluous folders from the top of the source tree.
+//
+
+	function tree.trimroot(tr) {
+		var trimmed;
+
+		// start by removing single-children folders from the top of the tree
+		while( #tr.children == 1 ) {
+			var node = tr.children[1];
+
+			// if this node has no children (it is the last node in the tree) I'm done
+			if( #node.children == 0 || node.trim == false ) {
+				break;
+			}
+
+			// remove this node from the tree, and move its children up a level
+			trimmed = true;
+			var numChildren = #node.children;
+			for( i = 1, numChildren ) {
+				var child = node.children[i];
+				child.parent = node.parent;
+				tr.children[i] = child;
+			}
+		}
+
+		// found the top, now remove any single-children ".." folders from here
+		var dotdot;
+		var count = #tr.children;
+		do {
+			dotdot = false;
+			for( i = 1, count ) {
+				var node = tr.children[i];
+				if( node.name == ".." && #node.children == 1 ) {
+					var child = node.children[1];
+					child.parent = node.parent;
+					tr.children[i] = child;
+					trimmed = true;
+					dotdot = true;
+				}
+			}
+		} while(!( ! dotdot) );
+
+		// if nodes were removed, adjust the paths on all remaining nodes
+		if( trimmed ) {
+			tree.traverse(tr, {
+				onnode = function(node) {
+					if( node.parent.path ) {
+						node.path = path.join(node.parent.path, node.name);
+					} else {
+						node.path = node.name;
+					}
+				}
+			}, false);
+		}
+	}

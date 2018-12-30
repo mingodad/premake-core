@@ -1,0 +1,25 @@
+
+//
+// Create an android namespace to isolate the additions
+//
+var p = premake;
+
+if( ! p.modules.android ) {
+	require ("vstudio");
+	p.modules.android = {};
+
+	if( _ACTION < "vs2015" ) {
+		configuration ({ "Android" });
+			system ("android");
+			toolset ("gcc");
+	}
+
+	// TODO: configure Android debug environment...
+
+	include("vsandroid_vcxproj.ljs");
+	include("vsandroid_sln2005.ljs");
+	include("vsandroid_vstudio.ljs");
+	include("vsandroid_androidproj.ljs");
+}
+
+return p.modules.android;

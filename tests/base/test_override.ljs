@@ -1,0 +1,75 @@
+//
+// tests/base/test_override.ljs
+// Verify function override support.
+// Copyright (c) 2012 Jason Perkins and the Premake project
+//
+
+
+	var p = premake;
+	var suite = test.declare("base_override");
+
+
+//
+// Setup
+//
+
+	var X = {};
+
+	function suite.setup() {
+		X.testfunc = function(value) {
+			return value || "testfunc";
+		};
+	}
+
+
+//
+// Should be able to completely replace the function with one of my own.
+//
+
+	function suite.canOverride() {
+		p.override(X, "testfunc", function() {
+			return "canOverride";
+		});
+		test.isequal("canOverride", X.testfunc());
+	}
+
+
+//
+// Should be able to reference the original implementation.
+//
+
+	function suite.canCallOriginal() {
+		p.override(X, "testfunc", function(base) {
+			return "canOverride > " .. base();
+		});
+		test.isequal("canOverride > testfunc", X.testfunc());
+	}
+
+
+//
+// Arguments should pass through.
+//
+
+	function suite.canPassThroughArguments() {
+		p.override(X, "testfunc", function(base, value) {
+			return value .. " > " .. base();
+		});
+		test.isequal("testval > testfunc", X.testfunc("testval"));
+	}
+
+
+//
+// Can override the same function multiple times.
+//
+
+	function suite.canOverrideMultipleTimes() {
+		p.override(X, "testfunc", function(base, value) {
+			return string.format("[%s > %s]", value, base("base1"));
+		});
+
+		p.override(X, "testfunc", function(base, value) {
+			return string.format("{%s > %s}", value, base("base2"));
+		});
+
+		test.isequal("{base3 > [base2 > base1]}", X.testfunc("base3"));
+	}

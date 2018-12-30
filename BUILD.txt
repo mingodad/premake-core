@@ -1,9 +1,9 @@
 PREMAKE BUILD INSTRUCTIONS
 
- Premake is written in a mix of C and Lua. A small host executable,
+ Premake is written in a mix of C and LJS. A small host executable,
  written in C, launches the app and prepares the environment, at which
- point control is handed off to a Lua script. Almost all of Premake is
- written in Lua scripts, which allow it to be easily extended and
+ point control is handed off to a LJS script. Almost all of Premake is
+ written in LJS scripts, which allow it to be easily extended and
  customized. The catch is that it is slightly more complicated to build
  it than your typical C/C++ application.
 
@@ -59,13 +59,13 @@ BUILDING FROM THE REPOSITORY
     $ premake --help  # to see a list of supported toolsets
 
  If this is the first time you have built Premake, or if you have made
- changes to the Lua scripts, you should prepare them to be embedded into the
+ changes to the LJS scripts, you should prepare them to be embedded into the
  Premake executable.
 
     $ premake5 embed
 
  This creates a C file (at src/host/scripts.c) which contains all of the
- Lua scripts as static string buffers. These then get compiled into the
+ LJS scripts as static string buffers. These then get compiled into the
  executable, which is how we get away with shipping a single file instead
  of a whole bunch of scripts.
 
@@ -89,7 +89,7 @@ RUNTIME SCRIPT LOADING
  development.
 
  If you are running Premake from the top of its own source tree (where its
- premake5.lua is located) you will get this behavior automatically. If you
+ premake5.ljs is located) you will get this behavior automatically. If you
  are running Premake from some other location, use the --scripts option to
  provide the path to that top-level folder:
 

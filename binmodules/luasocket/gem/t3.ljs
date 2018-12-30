@@ -1,0 +1,25 @@
+source = {};
+sink = {};
+pump = {};
+filter = {};
+
+// source.file
+dofile("ex5.ljs");
+
+// sink.table
+dofile("ex7.ljs");
+
+// sink.chain
+require("ltn12");
+sink.chain = ltn12.sink.chain;
+
+// normalize
+require("gem");
+eol = gem.eol;
+dofile("ex2.ljs");
+
+// pump.all
+dofile("ex10.ljs");
+
+// run test
+dofile("ex8.ljs");

@@ -1,0 +1,1624 @@
+//
+// vs200x_vcproj.ljs
+// Generate a Visual Studio 2005-2008 C/C++ project.
+// Copyright (c) Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	p.vstudio.vc200x = {};
+	var m = p.vstudio.vc200x;
+
+	var vstudio = p.vstudio;
+	var context = p.context;
+	var project = p.project;
+	var config = p.config;
+	var fileconfig = p.fileconfig;
+
+	m.elements = {};
+
+
+
+//-
+// Generate a Visual Studio 200x C++ or Makefile project.
+//-
+
+	m.elements.project = function(prj) {
+		return {
+			m.xmlElement,
+			m.visualStudioProject,
+			m.platforms,
+			m.toolFiles,
+			m.configurations,
+			m.references,
+			m.files,
+			m.globals
+		};
+	};
+
+	function m.generate(prj) {
+		p.indent("\t");
+		p.callArray(m.elements.project, prj);
+		p.pop('</VisualStudioProject>');
+		p.w();
+	}
+
+
+
+//-
+// Write the opening <VisualStudioProject> element of the project file.
+// In this case, the call list is for XML attributes rather than elements.
+//-
+
+	m.elements.visualStudioProject = function(prj) {
+		return {
+			m.projectType,
+			m.version,
+			m.projectName,
+			m.projectGUID,
+			m.rootNamespace,
+			m.keyword,
+			m.targetFrameworkVersion
+		};
+	};
+
+	function m.visualStudioProject(prj) {
+		p.push('<VisualStudioProject');
+		p.callArray(m.elements.visualStudioProject, prj);
+		p.w('>');
+	}
+
+
+
+//-
+// Write out the <Configurations> element group, enumerating each of the
+// configuration-architecture pairings.
+//-
+
+	function m.configurations(prj) {
+		p.push('<Configurations>');
+
+		// Visual Studio requires each configuration to be paired up with each
+		// architecture, even if the pairing doesn't make any sense (i.e. Win32
+		// DLL DCRT|PS3). Start by building a map between configurations and
+		// their Visual Studio names. I will use this to determine which
+		// pairings are "real", and which need to be synthesized.
+
+		var mapping = {};
+		for( cfg in project.eachconfig(prj) ) {
+			var name = vstudio.projectConfig(cfg);
+			mapping[cfg] = name;
+			mapping[name] = cfg;
+		}
+
+		// Now enumerate each configuration and architecture pairing
+
+		for( cfg in project.eachconfig(prj) ) {
+			for( i, arch in ipairs(architectures) ) {
+				var target;
+
+				// Generate a Visual Studio name from this pairing and see if
+				// it matches. If so, I can go ahead and output the markup for
+				// this configuration.
+
+				var testName = vstudio.projectConfig(cfg, arch);
+				if( testName == mapping[cfg] ) {
+					target = cfg;
+
+				// Okay, this pairing doesn't match this configuration. Check
+				// the mapping to see if it matches some *other* configuration.
+				// If it does, I can ignore it as it will getting written on
+				// another pass through the loop. If it does not, then this is
+				// one of those fake configurations that I have to synthesize.
+
+				} else if( ! mapping[testName] ) {
+					target = { fake = true };
+				}
+
+				// If I'm not ignoring this pairing, output the result now
+
+				if( target ) {
+					m.configuration(target, testName);
+					m.tools(target);
+					p.pop('</Configuration>');
+				}
+			}
+		}
+
+		p.pop('</Configurations>');
+	}
+
+
+
+//-
+// Write out the <Configuration> element, describing a specific Premake
+// build configuration/platform pairing.
+//-
+
+	m.elements.configuration = function(cfg) {
+		if( cfg.fake ) {
+			return {
+				m.intermediateDirectory,
+				m.configurationType
+			};
+		} else {
+			return {
+				m.outputDirectory,
+				m.intermediateDirectory,
+				m.configurationType,
+				m.useOfMFC,
+				m.characterSet,
+				m.managedExtensions,
+			};
+		}
+	};
+
+	function m.configuration(cfg, name) {
+		p.push('<Configuration');
+		p.w('Name="%s"', name);
+		p.callArray(m.elements.configuration, cfg);
+		p.w('>');
+	}
+
+
+
+//-
+// Return the list of tools required to build a specific configuration.
+// Each tool gets represented by an XML element in the project file, all
+// of which are implemented farther down in this file.
+//
+// @param cfg
+//    The configuration being written.
+//-
+
+	m.elements.tools = function(cfg) {
+		if( vstudio.isMakefile(cfg) && ! cfg.fake ) {
+			return {
+				m.VCNMakeTool
+			};
+		}
+		
+		return {
+			m.VCPreBuildEventTool,
+			m.VCCustomBuildTool,
+			m.VCXMLDataGeneratorTool,
+			m.VCWebServiceProxyGeneratorTool,
+			m.VCMIDLTool,
+			m.VCCLCompilerTool,
+			m.VCManagedResourceCompilerTool,
+			m.VCResourceCompilerTool,
+			m.VCPreLinkEventTool,
+			m.VCLinkerTool,
+			m.VCALinkTool,
+			m.VCManifestTool,
+			m.VCXDCMakeTool,
+			m.VCBscMakeTool,
+			m.VCFxCopTool,
+			m.VCAppVerifierTool,
+			m.VCPostBuildEventTool,
+		};
+	};
+
+	function m.tools(cfg) {
+		p.callArray(m.elements.tools, cfg, config.toolset(cfg));
+	}
+
+
+
+//-
+// Write out the <References> element group.
+//-
+
+	m.elements.references = function(prj) {
+		return {
+			m.assemblyReferences,
+			m.projectReferences,
+		};
+	};
+
+	function m.references(prj) {
+		p.push('<References>');
+		p.callArray(m.elements.references, prj);
+		p.pop('</References>');
+	}
+
+
+
+//-
+// Write out the <Files> element group.
+//-
+
+	function m.files(prj) {
+		var tr = m.filesSorted(prj);
+		p.push('<Files>');
+		p.tree.traverse(tr, {
+			onbranchenter = m.filesFilterStart,
+			onbranchexit = m.filesFilterEnd,
+			onleaf = m.filesFile,
+		}, false);
+		p.pop('</Files>');
+	}
+
+	function m.filesSorted(prj) {
+		// Fetch the source tree, sorted how Visual Studio likes it: alpha
+		// sorted, with any leading ../ sequences ignored. At the top level
+		// of the tree, files go after folders, otherwise before.
+		return project.getsourcetree(prj, function(a,b) {
+			var istop = (a.parent.parent == null);
+
+			var aSortName = a.name;
+			var bSortName = b.name;
+
+			// Only file nodes have a relpath field; folder nodes do not
+			if( a.relpath ) {
+				if( ! b.relpath ) {
+					return ! istop;
+				}
+				aSortName = a.relpath->gsub("%.%.%/", "");
+			}
+
+			if( b.relpath ) {
+				if( ! a.relpath ) {
+					return istop;
+				}
+				bSortName = b.relpath->gsub("%.%.%/", "");
+			}
+
+			return aSortName < bSortName;
+		});
+	}
+
+	function m.filesFilterStart(node) {
+		p.push('<Filter');
+		p.w('Name="%s"', node.name);
+		p.w('>');
+	}
+
+	function m.filesFilterEnd(node) {
+		p.pop('</Filter>');
+
+	}
+
+	function m.filesFile(node) {
+		p.push('<File');
+		p.w('RelativePath="%s"', path.translate(node.relpath));
+		p.w('>');
+		var prj = node.project;
+		for( cfg in project.eachconfig(prj) ) {
+			m.fileConfiguration(cfg, node);
+		}
+		p.pop('</File>');
+	}
+
+	m.elements.fileConfigurationAttributes = function(filecfg) {
+		return {
+			m.excludedFromBuild,
+		};
+	};
+
+	function m.fileConfiguration(cfg, node) {
+		var filecfg = fileconfig.getconfig(node, cfg);
+
+		// Generate the individual sections of the file configuration
+		// element and capture the results to a buffer. I will only
+		// write the file configuration if the buffers are not empty.
+
+		var configAttribs = p.capture(function () {
+			p.push();
+			p.callArray(m.elements.fileConfigurationAttributes, filecfg);
+			p.pop();
+		});
+
+		var compilerAttribs = p.capture(function () {
+			p.push();
+			m.VCCLCompilerTool(filecfg);
+			p.pop();
+		});
+
+		// lines() > 3 skips empty <Tool Name="VCCLCompiler" /> elements
+		if( #configAttribs > 0 || compilerAttribs->lines() > 3 ) {
+			p.push('<FileConfiguration');
+			p.w('Name="%s"', vstudio.projectConfig(cfg));
+			if( #configAttribs > 0 ) {
+				p.outln(configAttribs);
+			}
+			p.w('>');
+			p.outln(compilerAttribs);
+			p.pop('</FileConfiguration>');
+		}
+	}
+
+
+
+//-
+// I don't do anything with globals yet, but here it is if you want to
+// extend it.
+//-
+
+	m.elements.globals = function(prj) {
+		return {};
+	};
+
+	function m.globals(prj) {
+		p.push('<Globals>');
+		p.callArray(m.elements.globals, prj);
+		p.pop('</Globals>');
+	}
+
+
+
+//-------------------------------------------------------------------------
+//
+// Handlers for the individual tool sections of the project.
+//
+// There is a lot of repetition here; most of these tools are just
+// placeholders for modules to override as needed.
+//
+//-------------------------------------------------------------------------
+
+
+//-
+// The implementation of a "normal" tool. Writes the opening tool element
+// and name attribute, calls the corresponding function list, and then
+// closes the element.
+//
+// @param name
+//    The name of the tool, e.g. "VCCustomBuildTool".
+// @param ...
+//    Any additional arguments required by the call list.
+//-
+
+	function m.VCTool(name, cfg, ...) {
+		p.push('<Tool');
+
+		var nameFunc = m[name .. "Name"];
+		var callFunc = m.elements[name];
+
+		if( nameFunc ) {
+			name = nameFunc(cfg, ...);
+		}
+		p.w('Name="%s"', name);
+
+		if( cfg && ! cfg.fake ) {
+			p.callArray(callFunc, cfg, ...);
+		}
+
+		p.pop('/>');
+	}
+
+	//----------
+
+	m.elements.DebuggerTool = function(cfg) {
+		return {};
+	};
+
+	function m.DebuggerTool(cfg) {
+		p.push('<DebuggerTool');
+		p.pop('/>');
+	}
+
+	//----------
+
+	m.elements.VCALinkTool = function(cfg) {
+		return {};
+	};
+
+	function m.VCALinkTool(cfg) {
+		m.VCTool("VCALinkTool", cfg);
+	}
+
+	//----------
+
+	m.elements.VCAppVerifierTool = function(cfg) {
+		return {};
+	};
+
+	function m.VCAppVerifierTool(cfg) {
+		if( cfg.kind != p.STATICLIB ) {
+			m.VCTool("VCAppVerifierTool", cfg);
+		}
+	}
+
+	//----------
+
+	m.elements.VCBscMakeTool = function(cfg) {
+		return {};
+	};
+
+	function m.VCBscMakeTool(cfg) {
+		m.VCTool("VCBscMakeTool", cfg);
+	}
+
+	//----------
+
+	m.elements.VCCLCompilerTool = function(cfg, toolset) {
+		if( ! toolset ) {
+			// not a custom tool, use the standard set of attributes
+			return {
+				m.customBuildTool,
+				m.objectFile,
+				m.additionalCompilerOptions,
+				m.optimization,
+				m.additionalIncludeDirectories,
+				m.wholeProgramOptimization,
+				m.preprocessorDefinitions,
+				m.undefinePreprocessorDefinitions,
+				m.minimalRebuild,
+				m.basicRuntimeChecks,
+				m.bufferSecurityCheck,
+				m.stringPooling,
+				m.exceptionHandling,
+				m.runtimeLibrary,
+				m.enableFunctionLevelLinking,
+				m.enableEnhancedInstructionSet,
+				m.floatingPointModel,
+				m.runtimeTypeInfo,
+				m.treatWChar_tAsBuiltInType,
+				m.usePrecompiledHeader,
+				m.programDataBaseFileName,
+				m.warningLevel,
+				m.warnAsError,
+				m.detect64BitPortabilityProblems,
+				m.debugInformationFormat,
+				m.compileAs,
+				m.disableSpecificWarnings,
+				m.forcedIncludeFiles,
+				m.omitDefaultLib,
+			};
+		} else {
+			// custom tool, use subset of attributes
+			return {
+				m.additionalExternalCompilerOptions,
+				m.additionalIncludeDirectories,
+				m.preprocessorDefinitions,
+				m.undefinePreprocessorDefinitions,
+				m.usePrecompiledHeader,
+				m.programDataBaseFileName,
+				m.debugInformationFormat,
+				m.compileAs,
+				m.forcedIncludeFiles,
+			};
+		}
+	};
+
+	function m.VCCLCompilerToolName(cfg) {
+		var prjcfg, filecfg = config.normalize(cfg);
+		if( filecfg && fileconfig.hasCustomBuildRule(filecfg) ) {
+			return "VCCustomBuildTool";
+		} else {
+			return "VCCLCompilerTool";
+		}
+	}
+
+	function m.VCCLCompilerTool(cfg, toolset) {
+		m.VCTool("VCCLCompilerTool", cfg, toolset);
+	}
+
+	//----------
+
+	m.elements.VCCustomBuildTool = function(cfg) {
+		return {};
+	};
+
+	function m.VCCustomBuildTool(cfg) {
+		m.VCTool("VCCustomBuildTool", cfg);
+	}
+
+	//----------
+
+	m.elements.VCFxCopTool = function(cfg) {
+		return {};
+	};
+
+	function m.VCFxCopTool(cfg) {
+		m.VCTool("VCFxCopTool", cfg);
+	}
+
+	//----------
+
+	m.elements.VCLinkerTool = function(cfg, toolset) {
+		if( cfg.kind != p.STATICLIB ) {
+			return {
+				m.linkLibraryDependencies,
+				m.ignoreImportLibrary,
+				m.additionalLinkerOptions,
+				m.additionalDependencies,
+				m.outputFile,
+				m.linkIncremental,
+				m.additionalLibraryDirectories,
+				m.moduleDefinitionFile,
+				m.generateManifest,
+				m.generateDebugInformation,
+				m.programDatabaseFile,
+				m.subSystem,
+				m.largeAddressAware,
+				m.optimizeReferences,
+				m.enableCOMDATFolding,
+				m.entryPointSymbol,
+				m.importLibrary,
+				m.targetMachine,
+			};
+		} else {
+			return {
+				m.additionalLinkerOptions,
+				m.additionalDependencies,
+				m.outputFile,
+				m.additionalLibraryDirectories,
+			};
+		}
+	};
+
+	function m.VCLinkerToolName(cfg) {
+		if( cfg.kind == p.STATICLIB ) {
+			return "VCLibrarianTool";
+		} else {
+			return "VCLinkerTool";
+		}
+	}
+
+	function m.VCLinkerTool(cfg, toolset) {
+		m.VCTool("VCLinkerTool", cfg, toolset);
+	}
+
+	//----------
+
+	m.elements.VCManagedResourceCompilerTool = function(cfg) {
+		return {};
+	};
+
+	function m.VCManagedResourceCompilerTool(cfg) {
+		m.VCTool("VCManagedResourceCompilerTool", cfg);
+	}
+
+	//----------
+
+	m.elements.VCManifestTool = function(cfg) {
+		return {
+			m.additionalManifestFiles,
+		};
+	};
+
+	function m.VCManifestTool(cfg) {
+		if( cfg.kind != p.STATICLIB ) {
+			m.VCTool("VCManifestTool", cfg);
+		}
+	}
+
+	//----------
+
+	m.elements.VCMIDLTool = function(cfg) {
+		return {
+			m.targetEnvironment
+		};
+	};
+
+	function m.VCMIDLTool(cfg) {
+		m.VCTool("VCMIDLTool", cfg);
+	}
+
+	//----------
+
+	m.elements.VCNMakeTool = function(cfg) {
+		return {
+			m.buildCommandLine,
+			m.reBuildCommandLine,
+			m.cleanCommandLine,
+			m.output,
+			m.preprocessorDefinitions,
+			m.undefinePreprocessorDefinitions,
+			m.includeSearchPath,
+			m.forcedIncludes,
+			m.assemblySearchPath,
+			m.forcedUsingAssemblies,
+			m.compileAsManaged,
+		};
+	};
+
+	function m.VCNMakeTool(cfg) {
+		m.VCTool("VCNMakeTool", cfg);
+	}
+
+	//----------
+
+	m.elements.VCBuildTool = function(cfg, stage) {
+		return {
+			m.commandLine,
+		};
+	};
+
+	function m.VCBuildToolName(cfg, stage) {
+		return "VC" .. stage .. "EventTool";
+	}
+
+	function m.VCPreBuildEventTool(cfg) {
+		m.VCTool("VCBuildTool", cfg, "PreBuild");
+	}
+
+	function m.VCPreLinkEventTool(cfg) {
+		m.VCTool("VCBuildTool", cfg, "PreLink");
+	}
+
+	function m.VCPostBuildEventTool(cfg) {
+		m.VCTool("VCBuildTool", cfg, "PostBuild");
+	}
+
+	//----------
+
+	m.elements.VCResourceCompilerTool = function(cfg) {
+		return {
+			m.additionalResourceOptions,
+			m.resourcePreprocessorDefinitions,
+			m.additionalResourceIncludeDirectories,
+			m.culture,
+		};
+	};
+
+	function m.VCResourceCompilerTool(cfg) {
+		m.VCTool("VCResourceCompilerTool", cfg);
+	}
+
+	//----------
+
+	m.elements.VCWebServiceProxyGeneratorTool = function(cfg) {
+		return {};
+	};
+
+	function m.VCWebServiceProxyGeneratorTool(cfg) {
+		m.VCTool("VCWebServiceProxyGeneratorTool", cfg);
+	}
+
+	//----------
+
+	m.elements.VCXDCMakeTool = function(cfg) {
+		return {};
+	};
+
+	function m.VCXDCMakeTool(cfg) {
+		m.VCTool("VCXDCMakeTool", cfg);
+	}
+
+	//----------
+
+	m.elements.VCXMLDataGeneratorTool = function(cfg) {
+		return {};
+	};
+
+	function m.VCXMLDataGeneratorTool(cfg) {
+		m.VCTool("VCXMLDataGeneratorTool", cfg);
+	}
+
+
+
+//-------------------------------------------------------------------------
+//
+// Support functions
+//
+//-------------------------------------------------------------------------
+
+//
+// Return the debugging symbol level for a configuration.
+//
+
+	function m.symbols(cfg) {
+		if( ! (cfg.symbols == p.ON) ) {
+			return 0;
+		} else if( cfg.debugformat == "c7" ) {
+			return 1;
+		} else {
+			// Edit-and-continue doesn't work for some configurations
+			if( cfg.editandcontinue == p.OFF ||
+			   config.isOptimizedBuild(cfg) ||
+			   cfg.clr != p.OFF ||
+			   cfg.architecture == p.X86_64
+			) {
+				return 3;
+			} else {
+				return 4;
+			}
+		}
+	}
+
+
+
+//-------------------------------------------------------------------------
+//
+// Handlers for individual project elements
+//
+//-------------------------------------------------------------------------
+
+
+	function m.additionalCompilerOptions(cfg) {
+		var opts = cfg.buildoptions;
+		if( cfg.flags.MultiProcessorCompile ) {
+			table.insert(opts, "/MP");
+		}
+		if( #opts > 0 ) {
+			p.x('AdditionalOptions="%s"', table.concat(opts, " "));
+		}
+	}
+
+
+
+	function m.additionalDependencies(cfg, toolset) {
+		if( #cfg.links == 0 ) { return; }
+
+		var ex = vstudio.needsExplicitLink(cfg);
+
+		var links;
+		if( ! toolset ) {
+			links = vstudio.getLinks(cfg, ex);
+			for( i, link in ipairs(links) ) {
+				if( link->find(" ", 1, true) ) {
+					link = '"' .. link .. '"';
+				}
+				links[i] = path.translate(link);
+			}
+		} else {
+			links = path.translate(toolset.getlinks(cfg, ! ex));
+		}
+
+		if( #links > 0 ) {
+			p.x('AdditionalDependencies="%s"', table.concat(links, " "));
+		}
+	}
+
+
+
+	function m.additionalExternalCompilerOptions(cfg, toolset) {
+		var buildoptions = table.join(toolset.getcxxflags(cfg), cfg.buildoptions);
+		if( ! cfg.flags.NoPCH && cfg.pchheader ) {
+			table.insert(buildoptions, '--use_pch="$(IntDir)/$(TargetName).pch"');
+		}
+		if( #buildoptions > 0 ) {
+			p.x('AdditionalOptions="%s"', table.concat(buildoptions, " "));
+		}
+	}
+
+
+
+	function m.additionalImageOptions(cfg) {
+		if( #cfg.imageoptions > 0 ) {
+			p.x('AdditionalOptions="%s"', table.concat(cfg.imageoptions, " "));
+		}
+	}
+
+
+
+	function m.additionalIncludeDirectories(cfg) {
+		if( #cfg.includedirs > 0 ) {
+			var dirs = vstudio.path(cfg, cfg.includedirs);
+			p.x('AdditionalIncludeDirectories="%s"', table.concat(dirs, ";"));
+		}
+	}
+
+
+	function m.additionalLibraryDirectories(cfg) {
+		if( #cfg.libdirs > 0 ) {
+			var dirs = vstudio.path(cfg, cfg.libdirs);
+			p.x('AdditionalLibraryDirectories="%s"', table.concat(dirs, ";"));
+		}
+	}
+
+
+
+	function m.additionalLinkerOptions(cfg, toolset) {
+		var flags;
+		if( toolset ) {
+			flags = table.join(toolset.getldflags(cfg), cfg.linkoptions);
+		} else {
+			flags = cfg.linkoptions;
+		}
+		if( #flags > 0 ) {
+			p.x('AdditionalOptions="%s"', table.concat(flags, " "));
+		}
+	}
+
+
+
+	function m.additionalManifestFiles(cfg) {
+		var manifests = {};
+		for( i, fname in ipairs(cfg.files) ) {
+			if( path.getextension(fname) == ".manifest" ) {
+				table.insert(manifests, project.getrelative(cfg.project, fname));
+			}
+		}
+		if( #manifests > 0 ) {
+			p.x('AdditionalManifestFiles="%s"', table.concat(manifests, ";"));
+		}
+	}
+
+
+
+	function m.additionalResourceIncludeDirectories(cfg) {
+		var dirs = table.join(cfg.includedirs, cfg.resincludedirs);
+		if( #dirs > 0 ) {
+			dirs = vstudio.path(cfg, dirs);
+			p.x('AdditionalIncludeDirectories="%s"', table.concat(dirs, ";"));
+		}
+	}
+
+
+
+	function m.additionalResourceOptions(cfg) {
+		if( #cfg.resoptions > 0 ) {
+			p.x('AdditionalOptions="%s"', table.concat(cfg.resoptions, " "));
+		}
+	}
+
+
+
+	function m.assemblyReferences(prj) {
+		// Visual Studio doesn't support per-config references
+		var cfg = project.getfirstconfig(prj);
+		var refs = config.getlinks(cfg, "system", "fullpath", "managed");
+		table.foreachi(refs, function(value) {
+			p.push('<AssemblyReference');
+			p.x('RelativePath="%s"', path.translate(value));
+			p.pop('/>');
+		});
+	}
+
+
+
+	function m.assemblySearchPath(cfg) {
+		p.w('AssemblySearchPath=""');
+	}
+
+
+
+	function m.basicRuntimeChecks(cfg) {
+		var filecfg;
+		cfg, filecfg = config.normalize(cfg);
+		if( ! filecfg
+			&& ! config.isOptimizedBuild(cfg)
+			&& cfg.clr == p.OFF
+			&& ! cfg.flags.NoRuntimeChecks
+		) {
+			p.w('BasicRuntimeChecks="3"');
+		}
+	}
+
+
+
+	function m.bufferSecurityCheck(cfg) {
+		if( cfg.flags.NoBufferSecurityCheck ) {
+			p.w('BufferSecurityCheck="false"');
+		}
+	}
+
+
+
+	function m.buildCommandLine(cfg) {
+		var cmds = os.translateCommandsAndPaths(cfg.buildcommands, cfg.project.basedir, cfg.project.location);
+		p.x('BuildCommandLine="%s"', table.concat(cmds, "\r\n"));
+	}
+
+
+
+	function m.characterSet(cfg) {
+		if( ! vstudio.isMakefile(cfg) ) {
+			p.w('CharacterSet="%s"', (cfg.characterset == p.MBCS ? 2 : 1));
+		}
+	}
+
+
+
+	function m.cleanCommandLine(cfg) {
+		var cmds = os.translateCommandsAndPaths(cfg.cleancommands, cfg.project.basedir, cfg.project.location);
+		cmds = table.concat(cmds, "\r\n");
+		p.x('CleanCommandLine="%s"', cmds);
+	}
+
+
+
+	function m.commandLine(cfg, stage) {
+		var field = stage->lower();
+		var steps = cfg[field .. "commands"];
+		var msg = cfg[field .. "message"];
+		if( #steps > 0 ) {
+			if( msg ) {
+				p.x('Description="%s"', msg);
+			}
+			steps = os.translateCommandsAndPaths(steps, cfg.project.basedir, cfg.project.location);
+			p.x('CommandLine="%s"', table.implode(steps, "", "", "\r\n"));
+		}
+	}
+
+
+
+	function m.compileAs(cfg, toolset) {
+		var filecfg;
+		cfg, filecfg = config.normalize(cfg);
+		var c = p.languages.isc(cfg.language);
+		if( filecfg ) {
+			if( path.iscfile(filecfg.name) != c ) {
+				if( path.iscppfile(filecfg.name) ) {
+					var value = (c ? 2 : 1);
+					p.w('CompileAs="%s"', value);
+				}
+			}
+		} else {
+			var compileAs;
+			if( toolset ) {
+				compileAs = "0";
+			} else if( c ) {
+				compileAs = "1";
+			}
+			if( compileAs ) {
+				p.w('CompileAs="%s"', compileAs);
+			}
+		}
+	}
+
+
+
+	function m.disableSpecificWarnings(cfg) {
+		if( #cfg.disablewarnings > 0 ) {
+			p.x('DisableSpecificWarnings="%s"', table.concat(cfg.disablewarnings, ";"));
+		}
+	}
+
+
+
+	function m.compileAsManaged(cfg) {
+		p.w('CompileAsManaged=""');
+	}
+
+
+
+	function m.configurationType(cfg) {
+		var cfgtypes = {
+			Makefile = 0,
+			None = 0,
+			SharedLib = 2,
+			StaticLib = 4,
+		};
+		p.w('ConfigurationType="%s"', cfgtypes[cfg.kind] || 1);
+	}
+
+
+
+	function m.culture(cfg) {
+		var value = vstudio.cultureForLocale(cfg.locale);
+		if( value ) {
+			p.w('Culture="%d"', value);
+		}
+	}
+
+
+
+	function m.customBuildTool(cfg) {
+		var filecfg;
+		cfg, filecfg = config.normalize(cfg);
+		if( filecfg && fileconfig.hasCustomBuildRule(filecfg) ) {
+			var cmds = os.translateCommandsAndPaths(filecfg.buildcommands, filecfg.project.basedir, filecfg.project.location);
+			p.x('CommandLine="%s"', table.concat(cmds,'\r\n'));
+
+			var outputs = project.getrelative(filecfg.project, filecfg.buildoutputs);
+			p.x('Outputs="%s"', table.concat(outputs, ';'));
+
+			if( filecfg.buildinputs && #filecfg.buildinputs > 0 ) {
+				var inputs = project.getrelative(filecfg.project, filecfg.buildinputs);
+				p.x('AdditionalDependencies="%s"', table.concat(inputs, ';'));
+			}
+		}
+	}
+
+
+
+	function m.debugInformationFormat(cfg, toolset) {
+		var prjcfg, filecfg = config.normalize(cfg);
+		if( ! filecfg ) {
+			var fmt = (toolset ? "0" : m.symbols(cfg));
+			p.w('DebugInformationFormat="%s"', fmt);
+		}
+	}
+	
+
+
+	function m.detect64BitPortabilityProblems(cfg) {
+		var prjcfg, filecfg = config.normalize(cfg);
+		if( _ACTION < "vs2008" && cfg.clr == p.OFF && cfg.warnings != p.OFF && ! filecfg ) {
+			p.w('Detect64BitPortabilityProblems="%s"', tostring(! cfg.flags.No64BitChecks));
+		}
+	}
+
+
+
+	function m.enableCOMDATFolding(cfg, toolset) {
+		if( config.isOptimizedBuild(cfg) && ! toolset ) {
+			p.w('EnableCOMDATFolding="2"');
+		}
+	}
+
+
+
+	function m.largeAddressAware(cfg) {
+		if( (cfg.largeaddressaware == true) ) {
+			p.w('LargeAddressAware="2"');
+		}
+	}
+
+
+
+	function m.enableEnhancedInstructionSet(cfg) {
+		var map = { SSE = "1", SSE2 = "2" };
+		var value = map[cfg.vectorextensions];
+		if( value && cfg.architecture != "x86_64" ) {
+			p.w('EnableEnhancedInstructionSet="%d"', value);
+		}
+	}
+
+
+
+	function m.enableFunctionLevelLinking(cfg) {
+		var filecfg;
+		cfg, filecfg = config.normalize(cfg);
+		if( ! filecfg ) {
+			p.w('EnableFunctionLevelLinking="true"');
+		}
+	}
+
+
+
+	function m.entryPointSymbol(cfg, toolset) {
+		if( cfg.entrypoint ) {
+			p.w('EntryPointSymbol="%s"', cfg.entrypoint);
+		}
+	}
+
+
+
+	function m.exceptionHandling(cfg) {
+		if( cfg.exceptionhandling == p.OFF ) {
+			p.w('ExceptionHandling="%s"', (_ACTION < "vs2005" ? "FALSE" : 0));
+		} else if( cfg.exceptionhandling == "SEH" && _ACTION > "vs2003" ) {
+			p.w('ExceptionHandling="2"');
+		}
+	}
+
+
+
+	function m.excludedFromBuild(filecfg) {
+		if( ! filecfg || filecfg.flags.ExcludeFromBuild ) {
+			p.w('ExcludedFromBuild="true"');
+		}
+	}
+
+
+
+	function m.floatingPointModel(cfg) {
+		var map = { Strict = "1", Fast = "2" };
+		var value = map[cfg.floatingpoint];
+		if( value ) {
+			p.w('FloatingPointModel="%d"', value);
+		}
+	}
+
+
+
+	function m.forcedIncludeFiles(cfg) {
+		if( #cfg.forceincludes > 0 ) {
+			var includes = vstudio.path(cfg, cfg.forceincludes);
+			p.w('ForcedIncludeFiles="%s"', table.concat(includes, ';'));
+		}
+		if( #cfg.forceusings > 0 ) {
+			var usings = vstudio.path(cfg, cfg.forceusings);
+			p.w('ForcedUsingFiles="%s"', table.concat(usings, ';'));
+		}
+	}
+
+
+
+	function m.forcedIncludes(cfg) {
+		p.w('ForcedIncludes=""');
+	}
+
+
+
+	function m.forcedUsingAssemblies(cfg) {
+		p.w('ForcedUsingAssemblies=""');
+	}
+
+
+
+	function m.keyword(prj) {
+		var windows, managed, makefile;
+		for( cfg in project.eachconfig(prj) ) {
+			if( cfg.system == p.WINDOWS ) { windows = true; }
+			if( cfg.clr != p.OFF ) { managed = true; }
+			if( vstudio.isMakefile(cfg) ) { makefile = true; }
+		}
+
+		if( windows ) {
+			var keyword = "Win32Proj";
+			if( managed ) {
+				keyword = "ManagedCProj";
+			}
+			if( makefile ) {
+				keyword = "MakeFileProj";
+			}
+			p.w('Keyword="%s"', keyword);
+		}
+	}
+
+
+
+	function m.generateDebugInformation(cfg, toolset) {
+		if( ! toolset ) {
+			p.w('GenerateDebugInformation="%s"', tostring(m.symbols(cfg) != 0));
+		}
+	}
+
+
+
+	function m.generateManifest(cfg, toolset) {
+		if( cfg.flags.NoManifest || toolset ) {
+			p.w('GenerateManifest="false"');
+		}
+	}
+
+
+
+	function m.ignoreImportLibrary(cfg, toolset) {
+		if( cfg.flags.NoImportLib && ! toolset ) {
+			p.w('IgnoreImportLibrary="true"');
+		}
+	}
+
+
+
+	function m.importLibrary(cfg, toolset) {
+		if( cfg.kind == p.SHAREDLIB && ! toolset ) {
+			var implibdir = cfg.linktarget.abspath;
+
+			// I can't actually stop the import lib, but I can hide it in the objects directory
+			if( cfg.flags.NoImportLib ) {
+				implibdir = path.join(cfg.objdir, path.getname(implibdir));
+			}
+
+			implibdir = vstudio.path(cfg, implibdir);
+			p.x('ImportLibrary="%s"', implibdir);
+		}
+	}
+
+
+
+	function m.includeSearchPath(cfg) {
+		p.w('IncludeSearchPath=""');
+	}
+
+
+
+	function m.intermediateDirectory(cfg) {
+		var objdir;
+		if( ! cfg.fake ) {
+			objdir = vstudio.path(cfg, cfg.objdir);
+		} else {
+			objdir = "$(PlatformName)\\$(ConfigurationName)";
+		}
+		p.x('IntermediateDirectory="%s"', objdir);
+	}
+
+
+
+	function m.linkIncremental(cfg, toolset) {
+		var value;
+		if( ! toolset ) {
+			value = (config.canLinkIncremental(cfg)  ? 2 : 1);
+		} else {
+			value = 0;
+		}
+		p.w('LinkIncremental="%s"', value);
+	}
+
+
+
+	function m.linkLibraryDependencies(cfg, toolset) {
+		if( vstudio.needsExplicitLink(cfg) && ! toolset ) {
+			p.w('LinkLibraryDependencies="false"');
+		}
+	}
+
+
+
+	function m.managedExtensions(cfg) {
+		if( cfg.clr != p.OFF ) {
+			p.w('ManagedExtensions="1"');
+		}
+	}
+
+
+
+	function m.minimalRebuild(cfg) {
+		if( config.isDebugBuild(cfg) &&
+		   cfg.debugformat != "c7" &&
+		   ! cfg.flags.NoMinimalRebuild &&
+		   cfg.clr == p.OFF &&
+		   ! cfg.flags.MultiProcessorCompile
+		) {
+			p.w('MinimalRebuild="true"');
+		}
+	}
+
+
+
+	function m.moduleDefinitionFile(cfg, toolset) {
+		if( ! toolset ) {
+			var deffile = config.findfile(cfg, ".def");
+			if( deffile ) {
+				p.w('ModuleDefinitionFile="%s"', deffile);
+			}
+		}
+	}
+
+
+
+	function m.objectFile(cfg) {
+		var filecfg;
+		cfg, filecfg = config.normalize(cfg);
+		if( filecfg && path.iscppfile(filecfg.name) ) {
+			if( filecfg.objname != path.getbasename(filecfg.abspath) ) {
+				p.x('ObjectFile="$(IntDir)\\%s.obj"', filecfg.objname);
+			}
+		}
+	}
+
+
+
+	function m.omitDefaultLib(cfg) {
+		if( cfg.flags.OmitDefaultLibrary ) {
+			p.w('OmitDefaultLibName="true"');
+		}
+	}
+
+
+
+	function m.omitFramePointers(cfg) {
+		if( cfg.omitframepointer == "On" ) {
+			p.w('OmitFramePointers="true"');
+		}
+	}
+
+
+
+	function m.optimization(cfg) {
+		var map = { Off=0, On=3, Debug=0, Full=3, Size=1, Speed=2 };
+		var value = map[cfg.optimize];
+		if( value || ! cfg.abspath ) {
+			p.w('Optimization="%s"', value || 0);
+		}
+	}
+
+
+
+	function m.optimizeReferences(cfg, toolset) {
+		if( config.isOptimizedBuild(cfg) && ! toolset ) {
+			p.w('OptimizeReferences="2"');
+		}
+	}
+
+
+
+	function m.output(cfg) {
+		p.w('Output="$(OutDir)%s"', cfg.buildtarget.name);
+	}
+
+
+
+	function m.outputDirectory(cfg) {
+		var outdir = project.getrelative(cfg.project, cfg.buildtarget.directory);
+		p.x('OutputDirectory="%s"', path.translate(outdir));
+	}
+
+
+
+	function m.outputFile(cfg) {
+		p.x('OutputFile="$(OutDir)\\%s"', cfg.buildtarget.name);
+	}
+
+
+
+	function m.outputFileName(cfg) {
+		if( cfg.imagepath != null ) {
+			p.x('OutputFileName="%s"', path.translate(cfg.imagepath));
+		}
+	}
+
+
+
+	function m.platforms(prj) {
+		var architectures = {};
+		for( cfg in project.eachconfig(prj) ) {
+			var arch = vstudio.archFromConfig(cfg, true);
+			if( ! table.contains(architectures, arch) ) {
+				table.insert(architectures, arch);
+			}
+		}
+
+		p.push('<Platforms>');
+		table.foreachi(architectures, function(arch) {
+			p.push('<Platform');
+			p.w('Name="%s"', arch);
+			p.pop('/>');
+		});
+		p.pop('</Platforms>');
+	}
+
+
+
+	function m.preprocessorDefinitions(cfg) {
+		if( #cfg.defines > 0 || vstudio.isMakefile(cfg) ) {
+			p.x('PreprocessorDefinitions="%s"', table.concat(cfg.defines, ";"));
+		}
+	}
+
+
+	function m.undefinePreprocessorDefinitions(cfg) {
+		if( #cfg.undefines > 0 ) {
+			p.x('UndefinePreprocessorDefinitions="%s"', table.concat(cfg.undefines, ";"));
+		}
+	}
+
+
+	function m.programDatabaseFile(cfg, toolset) {
+		if( toolset ) {
+			p.w('ProgramDatabaseFile=""');
+		}
+	}
+
+
+	function m.programDataBaseFileName(cfg, toolset) {
+		if( toolset ) {
+			p.w('ProgramDataBaseFileName=""');
+		}
+	}
+
+
+
+	function m.projectGUID(prj) {
+		p.w('ProjectGUID="{%s}"', prj.uuid);
+	}
+
+
+
+	function m.projectName(prj) {
+		p.x('Name="%s"', prj.name);
+	}
+
+
+
+	function m.projectReferences(prj) {
+		var deps = project.getdependencies(prj);
+		if( #deps > 0 ) {
+			// This is a little odd: Visual Studio wants the "relative path to project"
+			// to be relative to the *workspace*, rather than the project doing the
+			// referencing. Which, in theory, would break if the project is included
+			// in more than one workspace. But that's how they do it.
+
+			for( i, dep in ipairs(deps) ) {
+				var relpath = vstudio.path(prj.workspace, vstudio.projectfile(dep));
+
+				// Visual Studio wants the path to start with ./ or ../
+				if( ! relpath->startswith(".") ) {
+					relpath = ".\\" .. relpath;
+				}
+
+				p.push('<ProjectReference');
+				p.w('ReferencedProjectIdentifier="{%s}"', dep.uuid);
+				p.w('RelativePathToProject="%s"', relpath);
+				p.pop('/>');
+			}
+		}
+	}
+
+
+
+	function m.projectType(prj) {
+		p.w('ProjectType="Visual C++"');
+	}
+
+
+
+	function m.reBuildCommandLine(cfg) {
+		var commands = table.concat(cfg.rebuildcommands, "\r\n");
+		p.x('ReBuildCommandLine="%s"', commands);
+	}
+
+
+
+	function m.resourcePreprocessorDefinitions(cfg) {
+		var defs = table.join(cfg.defines, cfg.resdefines);
+		if( #defs > 0 ) {
+			p.x('PreprocessorDefinitions="%s"', table.concat(defs, ";"));
+		}
+	}
+
+
+
+	function m.rootNamespace(prj) {
+		var hasWindows = project.hasConfig(prj, function(cfg) {
+			return cfg.system == p.WINDOWS;
+		});
+
+		// Technically, this should be skipped for pure makefile projects that
+		// do not contain any empty configurations. But I need to figure out a
+		// a good way to check the empty configuration bit first.
+
+		if( hasWindows && _ACTION > "vs2003" ) {
+			p.x('RootNamespace="%s"', prj.name);
+		}
+	}
+
+
+
+	function m.runtimeLibrary(cfg) {
+		var filecfg;
+		cfg, filecfg = config.normalize(cfg);
+		if( ! filecfg ) {
+			var runtimes = {
+				StaticRelease = 0,
+				StaticDebug = 1,
+				SharedRelease = 2,
+				SharedDebug = 3,
+			};
+			var runtime = config.getruntime(cfg);
+			if( runtime ) {
+				p.w('RuntimeLibrary="%s"', runtimes[runtime]);
+			} else {
+				// TODO: this path should probably be omitted and left for default
+				//       ...but I can't really test this, so I'm a leave it how I found it
+				p.w('RuntimeLibrary="%s"', (config.isDebugBuild(cfg) ? 3 : 2));
+			}
+		}
+	}
+
+
+
+	function m.runtimeTypeInfo(cfg) {
+		if( cfg.rtti == p.OFF && cfg.clr == p.OFF ) {
+			p.w('RuntimeTypeInfo="false"');
+		} else if( cfg.rtti == p.ON ) {
+			p.w('RuntimeTypeInfo="true"');
+		}
+	}
+
+
+	function m.stringPooling(cfg) {
+		if( config.isOptimizedBuild(cfg) ) {
+			p.w('StringPooling="true"');
+		}
+	}
+
+
+	function m.subSystem(cfg, toolset) {
+		if( ! toolset ) {
+			p.w('SubSystem="%s"', (cfg.kind == "ConsoleApp" ? 1 : 2));
+		}
+	}
+
+
+	function m.targetEnvironment(cfg) {
+		if( cfg.architecture == "x86_64" ) {
+			p.w('TargetEnvironment="3"');
+		}
+	}
+
+
+	function m.targetFrameworkVersion(prj) {
+		var windows, makefile;
+		for( cfg in project.eachconfig(prj) ) {
+			if( cfg.system == p.WINDOWS ) { windows = true; }
+			if( vstudio.isMakefile(cfg) ) { makefile = true; }
+		}
+
+		var version = 0;
+		if( makefile || ! windows ) {
+			version = 196613;
+		}
+		p.w('TargetFrameworkVersion="%d"', version);
+	}
+
+
+	function m.targetMachine(cfg, toolset) {
+		if( ! toolset ) {
+			p.w('TargetMachine="%d"', (cfg.architecture == "x86_64" ? 17 : 1));
+		}
+	}
+
+
+	function m.toolFiles(prj) {
+		if( _ACTION > "vs2003" ) {
+			p.w('<ToolFiles>');
+			p.w('</ToolFiles>');
+		}
+	}
+
+
+	function m.treatWChar_tAsBuiltInType(cfg) {
+		var map = { On = "true", Off = "false" };
+		var value = map[cfg.nativewchar];
+		if( value ) {
+			p.w('TreatWChar_tAsBuiltInType="%s"', value);
+		}
+	}
+
+
+	function m.useOfMFC(cfg) {
+		if( (cfg.flags.MFC) ) {
+			p.w('UseOfMFC="%d"', (cfg.staticruntime == "On" ? 1 : 2));
+		}
+	}
+
+
+	function m.usePrecompiledHeader(cfg) {
+		var prj, file = config.normalize(cfg);
+		if( file ) {
+			if( prj.pchsource == file.abspath &&
+			   ! prj.flags.NoPCH &&
+			   prj.system == p.WINDOWS
+			) {
+				p.w('UsePrecompiledHeader="1"');
+			} else if( file.flags.NoPCH ) {
+				p.w('UsePrecompiledHeader="0"');
+			}
+		} else {
+			if( ! prj.flags.NoPCH && prj.pchheader ) {
+				p.w('UsePrecompiledHeader="%s"', (_ACTION < "vs2005" ? 3 : 2));
+				p.x('PrecompiledHeaderThrough="%s"', prj.pchheader);
+			} else {
+				p.w('UsePrecompiledHeader="%s"', (_ACTION > "vs2003" || prj.flags.NoPCH ? 0 : 2));
+			}
+		}
+	}
+
+
+
+	function m.version(prj) {
+		var map = {
+			vs2002 = '7.0',
+			vs2003 = '7.1',
+			vs2005 = '8.0',
+			vs2008 = '9.0'
+		};
+		p.w('Version="%s0"', map[_ACTION]);
+	}
+
+
+
+	function m.warnAsError(cfg) {
+		if( cfg.flags.FatalCompileWarnings && cfg.warnings != p.OFF ) {
+			p.w('WarnAsError="true"');
+		}
+	}
+
+
+
+	function m.warningLevel(cfg) {
+		var prjcfg, filecfg = config.normalize(cfg);
+
+		var level;
+		if( cfg.warnings == p.OFF ) {
+			level = "0";
+		} else if( cfg.warnings == "Extra" ) {
+			level = "4";
+		} else if( ! filecfg ) {
+			level = "3";
+		}
+
+		if( level ) {
+			p.w('WarningLevel="%s"', level);
+		}
+	}
+
+
+
+	function m.wholeProgramOptimization(cfg) {
+		if( cfg.flags.LinkTimeOptimization ) {
+			p.x('WholeProgramOptimization="true"');
+		}
+	}
+
+
+	function m.xmlElement() {
+		p.w('<?xml version="1.0" encoding="Windows-1252"?>');
+	}

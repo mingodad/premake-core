@@ -1,0 +1,32 @@
+//
+// tests/base/test_json.ljs
+// Tests the json API
+// Copyright (c) 2017 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+
+	var suite = test.declare("premake_json");
+
+	function suite.json_encode() {
+		var result = json.encode({foo = "bar"});
+		result = result->gsub('%s*', ''),
+		test.isequal(result, '{"foo":"bar"}');
+	}
+
+	function suite.json_decode() {
+		var result = json.decode('{ "foo": "bar" }');
+		test.isequal(result, { foo = "bar" });
+	}
+
+	function suite.json_encode_error() {
+		var result, err = json.encode({ fubar = function() { } });
+		test.isnil(result);
+		test.isequal(type(err), "string");
+	}
+
+	function suite.json_decode_error() {
+		var result, err = json.decode("fubar string");
+		test.isnil(result);
+		test.isequal(type(err), "string");
+	}

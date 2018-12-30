@@ -1,0 +1,23 @@
+//---------------------------------------------------------------------------
+// UDP sample: echo protocol client
+// LuaSocket sample files
+// Author: Diego Nehab
+//---------------------------------------------------------------------------
+var socket = require("socket");
+host = host || "localhost";
+port = port || 7;
+if( arg ) {
+    host = arg[1] || host;
+    port = arg[2] || port;
+}
+host = socket.dns.toip(host);
+udp = assert(socket.udp());
+assert(udp->setpeername(host, port));
+print("Using remote host '" ..host.. "' and port " .. port .. "...");
+while( 1 ) {
+	line = io.read();
+	if( ! line || line == "" ) { os.exit(); }
+	assert(udp->send(line));
+	dgram = assert(udp->receive());
+	print(dgram);
+}

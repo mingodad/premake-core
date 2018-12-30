@@ -1,0 +1,99 @@
+//-
+// xcode/xcode4_workspace.ljs
+// Generate an Xcode workspace.
+// Author Mihai Sebea
+// Modified by Jason Perkins
+// Copyright (c) 2014-2015 Jason Perkins and the Premake project
+//-
+
+	var p = premake;
+	var m = p.modules.xcode;
+	var tree = p.tree;
+
+
+//-
+// Generate an Xcode contents.xcworkspacedata file.
+//-
+
+	m.elements.workspace = function(wks) {
+		return {
+			m.xmlDeclaration,
+			m.workspace,
+			m.workspaceFileRefs,
+			m.workspaceTail,
+		};
+	};
+
+	function m.generateWorkspace(wks) {
+		m.prepareWorkspace(wks);
+		p.callArray(m.elements.workspace, wks);
+	}
+
+
+	function m.workspace() {
+		p.push('<Workspace');
+		p.w('version = "1.0">');
+	}
+
+
+	function m.workspaceTail() {
+		// Don't output final newline.  Xcode doesn't.
+		p.out('</Workspace>');
+	}
+
+
+//-
+// Generate the list of project references.
+//-
+
+	m.elements.workspaceFileRef = function(prj) {
+		return {
+			m.workspaceLocation,
+		};
+	};
+
+	function m.workspaceFileRefs(wks) {
+		var tr = p.workspace.grouptree(wks);
+		tree.traverse(tr, {
+			onleaf = function(n) {
+				var prj = n.project;
+
+				p.push('<FileRef');
+				var contents = p.capture(function() {
+					p.callArray(m.elements.workspaceFileRef, prj);
+				});
+				p.outln(contents .. ">");
+				p.pop('</FileRef>');
+			},
+
+			onbranchenter = function(n) {
+				var prj = n.project;
+
+				p.push('<Group');
+				p.w('location = "container:"');
+				p.w('name = "%s">', n.name);
+			},
+			
+			onbranchexit = function(n) {
+				p.pop('</Group>');
+			},
+		});
+	}
+
+//-------------------------------------------------------------------------
+//
+// Handlers for individual project elements
+//
+//-------------------------------------------------------------------------
+
+
+	function m.workspaceLocation(prj) {
+		var fname = p.filename(prj, ".xcodeproj");
+		fname = path.getrelative(prj.workspace.location, fname);
+		p.w('location = "group:%s"', fname);
+	}
+
+
+	function m.xmlDeclaration() {
+		p.xmlUtf8(true);
+	}

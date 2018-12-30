@@ -1,0 +1,152 @@
+//
+// vs2010_vcxproj_user.ljs
+// Generate a Visual Studio 201x C/C++ project .user file
+// Copyright (c) Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var m = p.vstudio.vc2010;
+
+
+//
+// Generate a Visual Studio 201x C++ user file.
+//
+
+	m.elements.user = function(cfg) {
+		return {
+			m.debugSettings,
+		};
+	};
+
+	function m.generateUser(prj) {
+		// Only want output if there is something to configure
+		var contents = {};
+		var size = 0;
+
+		for( cfg in p.project.eachconfig(prj) ) {
+			contents[cfg] = p.capture(function() {
+				p.push(2);
+				p.callArray(m.elements.user, cfg);
+				p.pop(2);
+			});
+			size = size + #contents[cfg];
+		}
+
+		if( size > 0 ) {
+			m.xmlDeclaration();
+			m.userProject();
+			for( cfg in p.project.eachconfig(prj) ) {
+				p.push('<PropertyGroup %s>', m.condition(cfg));
+				if( #contents[cfg] > 0 ) {
+					p.outln(contents[cfg]);
+				}
+				p.pop('</PropertyGroup>');
+			}
+			p.pop('</Project>');
+		}
+	}
+
+
+
+//
+// Output the opening <Project> tag.
+//
+
+	function m.userProject() {
+		var action = p.action.current();
+		p.push('<Project ToolsVersion="%s" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">',
+			action.vstudio.toolsVersion);
+	}
+
+
+
+	m.elements.debugSettings = function(cfg) {
+		return {
+			m.localDebuggerCommand,
+			m.localDebuggerWorkingDirectory,
+			m.debuggerFlavor,
+			m.localDebuggerCommandArguments,
+			m.localDebuggerDebuggerType,
+			m.localDebuggerEnvironment,
+			m.localDebuggerMergeEnvironment,
+		};
+	};
+
+	function m.debugSettings(cfg) {
+		p.callArray(m.elements.debugSettings, cfg);
+	}
+
+
+
+	function m.debuggerFlavor(cfg) {
+		var map = {
+			Local = "WindowsLocalDebugger",
+			Remote = "WindowsRemoteDebugger",
+			WebBrowser = "WebBrowserDebugger",
+			WebService = "WebServiceDebugger"
+		};
+
+		var value = map[cfg.debuggerflavor];
+		if( value ) {
+			p.w('<DebuggerFlavor>%s</DebuggerFlavor>', value);
+		} else if( cfg.debugdir || cfg.debugcommand ) {
+			p.w('<DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>');
+		}
+	}
+
+
+
+	function m.localDebuggerCommand(cfg) {
+		if( cfg.debugcommand ) {
+			var dir = path.translate(cfg.debugcommand);
+			p.w('<LocalDebuggerCommand>%s</LocalDebuggerCommand>', dir);
+		}
+	}
+
+
+	function m.localDebuggerDebuggerType(cfg) {
+		if( cfg.debuggertype ) {
+			p.w('<LocalDebuggerDebuggerType>%s</LocalDebuggerDebuggerType>', cfg.debuggertype);
+		}
+	}
+
+
+	function m.localDebuggerCommandArguments(cfg) {
+		if( #cfg.debugargs > 0 ) {
+			var args = os.translateCommandsAndPaths(cfg.debugargs, cfg.project.basedir, cfg.project.location);
+			p.x('<LocalDebuggerCommandArguments>%s</LocalDebuggerCommandArguments>', table.concat(args, " "));
+		}
+	}
+
+
+
+	function m.localDebuggerWorkingDirectory(cfg) {
+		if( cfg.debugdir ) {
+			var dir = p.vstudio.path(cfg, cfg.debugdir);
+			p.x('<LocalDebuggerWorkingDirectory>%s</LocalDebuggerWorkingDirectory>', dir);
+		}
+	}
+
+
+
+	function m.localDebuggerEnvironment(cfg) {
+		if( #cfg.debugenvs > 0 ) {
+			var envs = table.concat(cfg.debugenvs, "\n");
+			if( cfg.flags.DebugEnvsInherit ) {
+				envs = envs .. "\n$(LocalDebuggerEnvironment)";
+			}
+			p.w('<LocalDebuggerEnvironment>%s</LocalDebuggerEnvironment>', envs);
+
+			if( cfg.flags.DebugEnvsDontMerge ) {
+				p.w(2,'<LocalDebuggerMergeEnvironment>false</LocalDebuggerMergeEnvironment>');
+			}
+		}
+	}
+
+
+
+	function m.localDebuggerMergeEnvironment(cfg) {
+		if( #cfg.debugenvs > 0 && cfg.flags.DebugEnvsDontMerge ) {
+			p.w(2,'<LocalDebuggerMergeEnvironment>false</LocalDebuggerMergeEnvironment>');
+		}
+	}

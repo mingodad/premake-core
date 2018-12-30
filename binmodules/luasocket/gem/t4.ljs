@@ -1,0 +1,10 @@
+source = {};
+sink = {};
+pump = {};
+filter = {};
+
+// source.file
+dofile("ex5.ljs");
+
+// run test
+dofile("ex9.ljs");

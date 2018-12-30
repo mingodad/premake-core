@@ -1,0 +1,174 @@
+//-
+// base/rule.ljs
+// Defines rule sets for generated custom rule files.
+// Copyright (c) 2014 Jason Perkins and the Premake project
+//-
+
+	var p = premake;
+	p.rule = p.api.container("rule", p.global);
+
+	var rule = p.rule;
+
+
+
+//-
+// Create a new rule container instance.
+//-
+
+	function rule.new(name) {
+		var this = p.container.new(rule, name);
+
+		// create a variable setting function. Do a version with lowercased
+		// first letter(s) to match Premake's naming style for other calls
+
+		_G[name .. "Vars"] = function(vars) {
+			rule.setVars(this, vars);
+		};
+
+		var lowerName =  name->gsub("^%u+", string.lower);
+		_G[lowerName .. "Vars"] = _G[name .. "Vars"];
+
+		return this;
+	}
+
+
+
+//-
+// Enumerate the property definitions for a rule.
+//-
+
+	function rule.eachProperty(this) {
+		var props = this.propertydefinition;
+		var i = 0;
+		return function () {
+			++i    ;
+			if( i <= #props ) {
+				return props[i];
+			}
+		};
+	}
+
+
+
+//-
+// Find a property definition by its name.
+//
+// @param name
+//    The property name.
+// @returns
+//    The property definition if found, nil otherwise.
+//-
+
+	function rule.getProperty(this, name) {
+		var props = this.propertydefinition;
+		for( i = 1, #props ) {
+			var prop = props[i];
+			if( prop.name == name ) {
+				return prop;
+			}
+		}
+	}
+
+
+
+//-
+// Find the field definition for one this rule's properties. This field
+// can then be used with the api.* functions to manipulate the property's
+// values in the current configuration scope.
+//
+// @param prop
+//    The property definition.
+// @return
+//    The field definition for the property; this will be created if it
+//    does not already exist.
+//-
+
+	function rule.getPropertyField(this, prop) {
+		if( prop._field ) {
+			return prop._field;
+		}
+
+		var kind = prop.kind || "string";
+		if( kind == "list" ) {
+			kind = "list:string";
+		}
+
+		var fld = p.field.new ({
+			name = "_rule_" .. this.name .. "_" .. prop.name,
+			scope = "config",
+			kind = kind,
+			tokens = true,
+		});
+
+		prop._field = fld;
+		return fld;
+	}
+
+
+
+//-
+// Set one or more rule variables in the current configuration scope.
+//
+// @param vars
+//    A key-value list of variables to set and their corresponding values.
+//-
+
+	function rule.setVars(this, vars) {
+		for( key, value in pairs(vars) ) {
+			var prop = rule.getProperty(this, key);
+			if( ! prop ) {
+				error (string.format("rule '%s' does not have property '%s'", this.name, key));
+			}
+
+			var fld = rule.getPropertyField(this, prop);
+			p.api.storeField(fld, value);
+		}
+	}
+
+
+
+//-
+// prepare an environment with the rule properties as global tokens,
+// according to the format specified.
+//
+// @param environ
+//    The environment table to fill up
+// @param format
+//    The formatting to be used, ie "[%s]".
+//-
+
+	function rule.prepareEnvironment(this, environ, format) {
+		for( _, def in ipairs(this.propertydefinition) ) {
+			environ[def.name] = string.format(format, def.name);
+		}
+	}
+
+	function rule.createEnvironment(this, format) {
+		var environ = {};
+		rule.prepareEnvironment(this, environ, format);
+		return environ;
+	}
+
+
+
+//-
+// prepare an table of pathVars with the rule properties as global tokens,
+// according to the format specified.
+//
+// @param pathVars
+//    The pathVars table to fill up
+// @param format
+//    The formatting to be used, ie "%%(%s)".
+//-
+
+	function rule.preparePathVars(this, pathVars, format) {
+		for( _, def in ipairs(this.propertydefinition) ) {
+			pathVars[def.name] = { absolute = true,  token = string.format(format, def.name) };
+		}
+	}
+
+	function rule.createPathVars(this, format) {
+		var pathVars = {};
+		rule.preparePathVars(this, pathVars, format);
+		return pathVars;
+	}

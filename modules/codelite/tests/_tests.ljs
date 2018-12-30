@@ -1,0 +1,7 @@
+require ("codelite");
+
+return {
+	"test_codelite_workspace.ljs",
+	"test_codelite_project.ljs",
+	"test_codelite_config.ljs",
+};

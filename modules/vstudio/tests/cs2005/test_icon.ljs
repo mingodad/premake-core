@@ -1,0 +1,51 @@
+//
+// tests/actions/vstudio/cs2005/test_icon.ljs
+// Validate generation of the application icon declaration.
+// Copyright (c) 2013 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("vstudio_cs2005_icon");
+	var dn2005 = p.vstudio.dotnetbase;
+
+
+//
+// Setup
+//
+
+	var wks;
+
+	function suite.setup() {
+		p.action.set("vs2005");
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare() {
+		prj = test.getproject(wks, 1);
+		dn2005.applicationIcon(prj);
+	}
+
+
+//
+// By default, there should be no output.
+//
+
+	function suite.noOutput_onNoIcon() {
+		prepare();
+		test.isemptycapture();
+	}
+
+
+//
+// If an icon is specified, output the property group.
+//
+
+	function suite.doesOutput_onIcon() {
+		icon ("MyApp.ico");
+		prepare();
+		test.capture ([=[
+	<PropertyGroup>
+		<ApplicationIcon>MyApp.ico</ApplicationIcon>
+	</PropertyGroup>
+		]=]);
+	}

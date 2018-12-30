@@ -1,3 +1,7 @@
+# LJS port of PREMAKE 5
+
+For LJS info see https://github.com/mingodad/ljs
+
 # PREMAKE 5 (core)
 <img src="https://github.com/premake/premake-core/wiki/linux-widget.jpeg" width="24" height="24"/> [![Build Status](https://travis-ci.org/premake/premake-core.svg?branch=master)](https://travis-ci.org/premake/premake-core)
  <img src="https://github.com/premake/premake-core/wiki/windows-widget.jpeg" width="24" height="24"/> [![Build status](https://ci.appveyor.com/api/projects/status/lc9g332y2lqvel8h?svg=true)](https://ci.appveyor.com/project/PremakeOrganization/premake-core)

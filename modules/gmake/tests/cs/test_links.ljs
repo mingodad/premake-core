@@ -1,0 +1,60 @@
+//
+// tests/actions/make/cs/test_links.ljs
+// Tests linking for C# Makefiles.
+// Copyright (c) 2013 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("make_cs_links");
+	var make = p.make;
+	var cs = p.make.cs;
+	var project = p.project;
+
+//
+// Setup
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare() {
+		var cfg = test.getconfig(prj, "Debug");
+		make.csLinkCmd(cfg, p.tools.dotnet);
+	}
+
+
+//
+// Should return an empty assignment if nothing has been specified.
+//
+
+	function suite.isEmptyAssignment_onNoSettings() {
+		prepare();
+		test.capture ([=[
+  DEPENDS =
+		]=]);
+	}
+
+
+//
+// Files that can be compiled should be listed here.
+//
+
+	function suite.doesListLinkDependencyFiles() {
+		links ({ "MyProject2", "MyProject3" });
+
+		test.createproject(wks);
+		kind ("SharedLib");
+		language ("C#");
+
+		test.createproject(wks);
+		kind ("SharedLib");
+		language ("C#");
+
+		prepare ();
+		test.capture ([=[
+  DEPENDS = bin/Debug/MyProject2.dll bin/Debug/MyProject3.dll
+		]=]);
+	}

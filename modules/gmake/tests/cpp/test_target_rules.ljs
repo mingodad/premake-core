@@ -1,0 +1,57 @@
+//
+// tests/actions/make/cpp/test_target_rules.ljs
+// Validate the makefile target building rules.
+// Copyright (c) 2009-2013 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("make_cpp_target_rules");
+	var make = p.make;
+	var project = p.project;
+
+
+//
+// Setup
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare() {
+		var cfg = test.getconfig(prj, "Debug");
+		make.cppAllRules(cfg);
+	}
+
+
+//
+// Check the default, normal format of the rules.
+//
+
+	function suite.defaultRules() {
+		prepare();
+		test.capture ([=[
+all: prebuild prelink $(TARGET)
+	@:
+		]=]);
+	}
+
+
+//
+// Check rules for an OS X Cocoa application.
+//
+
+	function suite.osxWindowedAppRules() {
+		system ("MacOSX");
+		kind ("WindowedApp");
+		prepare();
+		test.capture ([=[
+all: prebuild prelink $(TARGET) $(dir $(TARGETDIR))PkgInfo $(dir $(TARGETDIR))Info.plist
+	@:
+
+$(dir $(TARGETDIR))PkgInfo:
+$(dir $(TARGETDIR))Info.plist:
+		]=]);
+	}

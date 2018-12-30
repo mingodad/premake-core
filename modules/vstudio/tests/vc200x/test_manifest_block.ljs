@@ -1,0 +1,57 @@
+//
+// tests/actions/vstudio/vc200x/test_manifest_block.ljs
+// Validate generation of VCManifest elements Visual Studio 200x C/C++ projects.
+// Copyright (c) 2009-2013 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("vs200x_manifest_block");
+	var vc200x = p.vstudio.vc200x;
+
+
+//
+// Setup/teardown
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		p.action.set("vs2008");
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare() {
+		var cfg = test.getconfig(prj, "Debug");
+		vc200x.VCManifestTool(cfg);
+	}
+
+
+//
+// The manifest tool should empty if there are no manifest files.
+//
+
+	function suite.isEmpty_onNoManifests() {
+		files ({ "hello.c" });
+		prepare();
+		test.capture ([=[
+<Tool
+	Name="VCManifestTool"
+/>
+		]=]);
+	}
+
+
+//
+// If manifest file(s) are present, they should be listed.
+//
+
+	function suite.listsFiles_onManifests() {
+		files ({ "hello.c", "project1.manifest", "goodbye.c", "project2.manifest" });
+		prepare();
+		test.capture ([=[
+<Tool
+	Name="VCManifestTool"
+	AdditionalManifestFiles="project1.manifest;project2.manifest"
+/>
+		]=]);
+	}

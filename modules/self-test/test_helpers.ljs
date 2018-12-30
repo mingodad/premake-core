@@ -1,0 +1,87 @@
+//-
+// test_helpers.ljs
+//
+// Helper functions for setting up workspaces and projects, etc.
+//
+// Author Jason Perkins
+// Copyright (c) 2008-2016 Jason Perkins and the Premake project.
+//-
+
+	var p = premake;
+
+	var m = p.modules.self_test;
+
+
+
+	function m.createWorkspace() {
+		var wks = workspace("MyWorkspace");
+		configurations ({ "Debug", "Release" });
+		var prj = m.createProject(wks);
+		return wks, prj;
+	}
+
+
+
+	// Eventually we'll want to deprecate this one and move everyone
+	// over to createWorkspace() instead (4 Sep 2015).
+
+	function m.createsolution() {
+		var wks = workspace("MySolution");
+		configurations ({ "Debug", "Release" });
+		var prj = m.createproject(wks);
+		return wks, prj;
+	}
+
+
+
+	function m.createProject(wks) {
+		var n = #wks.projects + 1;
+		if( n == 1 ) { n = ""; }
+
+		var prj = project ("MyProject" .. n);
+		language ("C++");
+		kind ("ConsoleApp");
+		return prj;
+	}
+
+	function m.createGroup(wks) {		
+		var prj = group ("MyGroup" .. (#wks.groups + 1));
+		return prj;
+	}
+
+
+	function m.getWorkspace(wks) {
+		p.oven.bake();
+		return p.global.getWorkspace(wks.name);
+	}
+
+
+	function m.getRule(name) {
+		p.oven.bake();
+		return p.global.getRule(name);
+	}
+
+
+	function m.getProject(wks, i) {
+		wks = m.getWorkspace(wks);
+		return p.workspace.getproject(wks, i || 1);
+	}
+
+
+
+	function m.getConfig(prj, buildcfg, platform) {
+		var wks = m.getWorkspace(prj.workspace);
+		prj = p.workspace.getproject(wks, prj.name);
+		return p.project.getconfig(prj, buildcfg, platform);
+	}
+
+
+
+	m.print = print;
+
+
+
+	p.alias(m, "createProject", "createproject");
+	p.alias(m, "getConfig", "getconfig");
+	p.alias(m, "getProject", "getproject");
+	p.alias(m, "getWorkspace", "getsolution");

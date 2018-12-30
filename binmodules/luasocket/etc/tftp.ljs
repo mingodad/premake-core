@@ -1,0 +1,154 @@
+//---------------------------------------------------------------------------
+// TFTP support for the Lua language
+// LuaSocket toolkit.
+// Author: Diego Nehab
+//---------------------------------------------------------------------------
+
+//---------------------------------------------------------------------------
+// Load required files
+//---------------------------------------------------------------------------
+var base = _G;
+var table = require("table");
+var math = require("math");
+var string = require("string");
+var socket = require("socket");
+var ltn12 = require("ltn12");
+var url = require("socket.url");
+module("socket.tftp");
+
+//---------------------------------------------------------------------------
+// Program constants
+//---------------------------------------------------------------------------
+var char = string.char;
+var byte = string.byte;
+
+PORT = 69;
+var OP_RRQ = 1;
+var OP_WRQ = 2;
+var OP_DATA = 3;
+var OP_ACK = 4;
+var OP_ERROR = 5;
+var OP_INV = {"RRQ", "WRQ", "DATA", "ACK", "ERROR"};
+
+//---------------------------------------------------------------------------
+// Packet creation functions
+//---------------------------------------------------------------------------
+var function RRQ(source, mode) {
+    return char(0, OP_RRQ) .. source .. char(0) .. mode .. char(0);
+}
+
+var function WRQ(source, mode) {
+    return char(0, OP_RRQ) .. source .. char(0) .. mode .. char(0);
+}
+
+var function ACK(block) {
+    var low, high;
+    low = math.mod(block, 256);
+    high = (block - low)/256;
+    return char(0, OP_ACK, high, low);
+}
+
+var function get_OP(dgram) {
+    var op = byte(dgram, 1)*256 + byte(dgram, 2);
+    return op;
+}
+
+//---------------------------------------------------------------------------
+// Packet analysis functions
+//---------------------------------------------------------------------------
+var function split_DATA(dgram) {
+    var block = byte(dgram, 3)*256 + byte(dgram, 4);
+    var data = string.sub(dgram, 5);
+    return block, data;
+}
+
+var function get_ERROR(dgram) {
+    var code = byte(dgram, 3)*256 + byte(dgram, 4);
+    var msg;
+    _,_, msg = string.find(dgram, "(.*)\000", 5);
+    return string.format("error code %d: %s", code, msg);
+}
+
+//---------------------------------------------------------------------------
+// The real work
+//---------------------------------------------------------------------------
+var function tget(gett) {
+    var retries, dgram, sent, datahost, dataport, code;
+    var last = 0;
+    socket.try(gett.host, "missing host");
+    var con = socket.try(socket.udp());
+    var try = socket.newtry(function() { con->close(); });
+    // convert from name to ip if needed
+    gett.host = try(socket.dns.toip(gett.host));
+    con->settimeout(1);
+    // first packet gives data host/port to be used for data transfers
+    var path = string.gsub(gett.path || "", "^/", "");
+    path = url.unescape(path);
+    retries = 0;
+    do {
+        sent = try(con->sendto(RRQ(path, "octet"), gett.host, gett.port));
+        dgram, datahost, dataport = con->receivefrom();
+        ++retries    ;
+    } while(!( dgram || datahost != "timeout" || retries > 5) );
+    try(dgram, datahost);
+    // associate socket with data host/port
+    try(con->setpeername(datahost, dataport));
+    // default sink
+    var sink = gett.sink || ltn12.sink.snull();
+    // process all data packets
+    while( 1 ) {
+        // decode packet
+        code = get_OP(dgram);
+        try(code != OP_ERROR, get_ERROR(dgram));
+        try(code == OP_DATA, "unhandled opcode " .. code);
+        // get data packet parts
+        var block, data = split_DATA(dgram);
+        // if not repeated, write
+        if( block == last+1 ) {
+            try(sink(data));
+            last = block;
+        }
+        // last packet brings less than 512 bytes of data
+        if( string.len(data) < 512 ) {
+            try(con->send(ACK(block)));
+            try(con->close());
+            try(sink(null));
+            return 1;
+        }
+        // get the next packet
+        retries = 0;
+        do {
+            sent = try(con->send(ACK(last)));
+            dgram, err = con->receive();
+            ++retries    ;
+        } while(!( dgram || err != "timeout" || retries > 5) );
+        try(dgram, err);
+    }
+}
+
+var default = {
+    port = PORT,
+    path ="/",
+    scheme = "tftp"
+};
+
+var function parse(u) {
+    var t = socket.try(url.parse(u, default));
+    socket.try(t.scheme == "tftp", "invalid scheme '" .. t.scheme .. "'");
+    socket.try(t.host, "invalid host");
+    return t;
+}
+
+var function sget(u) {
+    var gett = parse(u);
+    var t = {};
+    gett.sink = ltn12.sink.table(t);
+    tget(gett);
+    return table.concat(t);
+}
+
+get = socket.protect(function(gett) {
+    if( base.type(gett) == "string" ) { return sget(gett);
+    } else { return tget(gett); }
+});
+

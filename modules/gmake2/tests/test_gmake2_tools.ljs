@@ -1,0 +1,36 @@
+//
+// test_gmake2_tools.ljs
+// Tests for tools support in makefiles.
+// (c) 2016-2017 Jason Perkins, Blizzard Entertainment and the Premake project
+//
+
+	var suite = test.declare("gmake2_tools");
+
+	var p = premake;
+	var gmake2 = p.modules.gmake2;
+
+	var project = premake.project;
+
+
+//
+// Setup
+//
+
+	var cfg;
+
+	function suite.setup() {
+		var wks, prj = test.createWorkspace();
+		cfg = test.getconfig(prj, "Debug");
+	}
+
+
+//
+// Make sure that the correct tools are used.
+//
+
+	function suite.usesCorrectTools() {
+		gmake2.cpp.tools(cfg, p.tools.gcc);
+		test.capture ([=[
+RESCOMP = windres
+		]=]);
+	}

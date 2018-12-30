@@ -1,0 +1,46 @@
+var socket = require("socket");
+var http = require("socket.http");
+
+if( ! arg || ! arg[1] || ! arg[2] ) {
+    print("luasocket cddb.ljs <category> <disc-id> [<server>]");
+    os.exit(1);
+}
+
+var server = arg[3] || "http://freedb.freedb.org/~cddb/cddb.cgi";
+
+function parse(body) {
+    var lines = string.gfind(body, "(.-)\r\n");
+    var status = lines();
+    var code, message = socket.skip(2, string.find(status, "(%d%d%d) (.*)"));
+    if( tonumber(code) != 210 ) {
+        return null, code, message;
+    }
+    var data = {};
+    for( l in lines ) {
+        var c = string.sub(l, 1, 1);
+        if( c != '#' && c != '.' ) {
+            var key, value = socket.skip(2, string.find(l, "(.-)=(.*)"));
+            value = string.gsub(value, "\\n", "\n");
+            value = string.gsub(value, "\\\\", "\\");
+            value = string.gsub(value, "\\t", "\t");
+            data[key] = value;
+        }
+    }
+    return data, code, message; 
+}
+
+var host = socket.dns.gethostname();
+var query = "%s?cmd=cddb+read+%s+%s&hello=LuaSocket+%s+LuaSocket+2.0&proto=6";
+var url = string.format(query, server, arg[1], arg[2], host);
+var body, headers, code = http.request(url);
+
+if( code == 200 ) {
+    var data, xcode, error = parse(body);
+    if( ! data ) {
+        print(error || xcode);
+    } else {
+        for( i,v in pairs(data) ) {
+            io.write(i, ': ', v, '\n');
+        }
+    }
+} else { print(error); }

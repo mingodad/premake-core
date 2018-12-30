@@ -1,0 +1,8 @@
+return {
+	"_preload.ljs",
+	"android.ljs",
+	"vsandroid_vcxproj.ljs",
+	"vsandroid_sln2005.ljs",
+	"vsandroid_vstudio.ljs",
+	"vsandroid_androidproj.ljs",
+};

@@ -1,0 +1,57 @@
+//
+// tests/project/test_location.ljs
+// Test handling of the projects's location field.
+// Copyright (c) 2013 Jason Perkins and the Premake project
+//
+
+	var suite = test.declare("project_location");
+
+
+//
+// Setup and teardown
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		wks = test.createWorkspace();
+	}
+
+	var function prepare() {
+		prj = test.getproject(wks, 1);
+	}
+
+
+//
+// If no explicit location is set, the location should be set to the
+// directory containing the script which defined the project.
+//
+
+	function suite.usesScriptLocation_onNoLocation() {
+		prepare();
+		test.isequal(os.getcwd(), prj.location);
+	}
+
+
+//
+// If an explicit location has been set, use it.
+//
+
+	function suite.usesLocation_onLocationSet() {
+		location ("build");
+		prepare();
+		test.isequal(path.join(os.getcwd(), "build"), prj.location);
+	}
+
+
+//
+// If the workspace sets a location, and the project does not, it should
+// inherit the value from the workspace.
+//
+
+	function suite.inheritsWorkspaceLocation_onNoProjectLocation() {
+		workspace ();
+		location ("build");
+		prepare();
+		test.isequal(path.join(os.getcwd(), "build"), prj.location);
+	}

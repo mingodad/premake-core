@@ -1,0 +1,428 @@
+//-
+// vs2010_rules_xml.ljs
+// Generate a Visual Studio 201x custom rules XML file.
+// Copyright (c) Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	p.vstudio.vs2010.rules.xml = {};
+
+	var m = p.vstudio.vs2010.rules.xml;
+	m.elements = {};
+
+
+//-
+// Entry point; generate the root <ProjectSchemaDefinitions> element.
+//-
+
+	m.elements.project = function(r) {
+		return {
+			m.projectSchemaDefinitions,
+			m.rule,
+			m.ruleItem,
+			m.fileExtension,
+			m.contentType,
+		};
+	};
+
+	function m.generate(r) {
+		p.xmlUtf8();
+		p.callArray(m.elements.project, r);
+		p.out('</ProjectSchemaDefinitions>');
+	}
+
+
+
+//-
+// Generate the main <Rule> element.
+//-
+
+	m.elements.rule = function(r) {
+		return {
+			m.dataSource,
+			m.categories,
+			m.inputs,
+			m.properties,
+			m.commandLineTemplate,
+			m.beforeTargets,
+			m.afterTargets,
+			m.outputs,
+			m.executionDescription,
+			m.additionalDependencies,
+			m.additionalOptions,
+		};
+	};
+
+	function m.rule(r) {
+		p.push('<Rule');
+		p.w('Name="%s"', r.name);
+		p.w('PageTemplate="tool"');
+		p.w('DisplayName="%s"', r.display || r.name);
+		p.w('Order="200">');
+		p.callArray(m.elements.rule, r);
+		p.pop('</Rule>');
+	}
+
+
+
+//-
+// Generate the list of categories.
+//-
+
+	function m.categories(r) {
+		var categories = {
+			[1] = { name="General" },
+		};
+		var propCategory = {};
+		var defs = r.propertydefinition;
+		for( i = 1, #defs ) {
+			var def = defs[i];
+			var cat = def.category;
+			if( cat ) {
+				if( type(cat) == "string" && cat != "Command Line" && cat != "General" ) {
+					if( ! propCategory[cat] ) {
+						table.insert(categories, { name=cat });
+						propCategory[cat] = true;
+					}
+				} else {
+					def.category = null;
+				}
+			}
+		}
+		table.insert(categories, { name="Command Line", subtype="CommandLine" });
+		p.push('<Rule.Categories>');
+		for( i = 1, #categories ) {
+			m.category(categories[i]);
+		}
+		p.pop('</Rule.Categories>');
+	}
+
+
+	function m.category(cat) {
+		var attribs = p.capture(function() {
+			p.push();
+			p.w('Name="%s"', cat.name);
+			if( cat.subtype ) {
+				p.w('Subtype="%s"', cat.subtype);
+			}
+			p.pop();
+		});
+
+		p.push('<Category');
+		p.outln(attribs .. '>');
+
+		p.push('<Category.DisplayName>');
+		p.w('<sys:String>%s</sys:String>', cat.name);
+		p.pop('</Category.DisplayName>');
+
+		p.pop('</Category>');
+	}
+
+
+
+//-
+// Generate the list of property definitions.
+//-
+
+	function m.properties(r) {
+		var defs = r.propertydefinition;
+		for( i = 1, #defs ) {
+			var def = defs[i];
+			if( def.kind == "boolean" ) {
+				m.boolProperty(def);
+			} else if( def.kind == "list" ) {
+				m.stringListProperty(def);
+			} else if( type(def.values) == "table" ) {
+				m.enumProperty(def);
+			} else if( def.kind && def.kind->startswith("list:") ) {
+				m.stringListProperty(def);
+			} else {
+				m.stringProperty(def);
+			}
+		}
+	}
+
+
+	function m.baseProperty(def, suffix) {
+		var c = p.capture(function () {
+			p.w('Name="%s"', def.name);
+			p.w('HelpContext="0"');
+			p.w('DisplayName="%s"', def.display || def.name);
+			if( def.description ) {
+				p.w('Description="%s"', def.description);
+			}
+			if( def.category ) {
+				p.w('Category="%s"', def.category);
+			}
+		});
+		if( suffix ) {
+			c = c .. suffix;
+		}
+		p.outln(c);
+	}
+
+
+	function m.boolProperty(def) {
+		p.push('<BoolProperty');
+		m.baseProperty(def);
+		if( def.switch ) {
+			p.w('Switch="%s"', def.switch);
+		}
+		p.w('/>');
+		p.pop();
+	}
+
+
+	function m.enumProperty(def) {
+		p.push('<EnumProperty');
+		m.baseProperty(def, '>');
+
+		var values = def.values;
+		var switches = def.switch || {};
+
+		var keys = table.keys(def.values);
+		table.sort(keys);
+
+		for( _, key in pairs(keys) ) {
+			p.push('<EnumValue');
+			p.w('Name="%d"', key);
+			if( switches[key] ) {
+				p.w('DisplayName="%s"', values[key]);
+				if( switches[key] ) {
+					p.w('Switch="%s"', switches[key]);
+				}
+			} else {
+				p.w('DisplayName="%s"', values[key]);
+			}
+			p.w('/>');
+			p.pop();
+		}
+
+		p.pop('</EnumProperty>');
+	}
+
+
+	function m.stringProperty(def) {
+		p.push('<StringProperty');
+		m.baseProperty(def);
+		if( def.switch ) {
+			p.w('Switch="%s"', def.switch);
+		}
+		p.w('/>');
+		p.pop();
+	}
+
+
+	function m.stringListProperty(def) {
+		p.push('<StringListProperty');
+		m.baseProperty(def);
+		if( def.separator ) {
+			p.w('Separator="%s"', def.separator);
+		}
+		if( def.switch ) {
+			p.w('Switch="%s"', def.switch);
+		}
+		p.w('/>');
+		p.pop();
+	}
+
+
+
+//-
+// Implementations of individual elements.
+//-
+
+	function m.additionalDependencies(r) {
+		p.push('<StringListProperty');
+		p.w('Name="AdditionalDependencies"');
+		p.w('DisplayName="Additional Dependencies"');
+		p.w('IncludeInCommandLine="False"');
+		p.w('Visible="false" />');
+		p.pop();
+	}
+
+
+
+	function m.additionalOptions(r) {
+		p.push('<StringProperty');
+		p.w('Subtype="AdditionalOptions"');
+		p.w('Name="AdditionalOptions"');
+		p.w('Category="Command Line">');
+		p.push('<StringProperty.DisplayName>');
+		p.w('<sys:String>Additional Options</sys:String>');
+		p.pop('</StringProperty.DisplayName>');
+		p.push('<StringProperty.Description>');
+		p.w('<sys:String>Additional Options</sys:String>');
+		p.pop('</StringProperty.Description>');
+		p.pop('</StringProperty>');
+	}
+
+
+
+	function m.afterTargets(r) {
+		p.push('<DynamicEnumProperty');
+		p.w('Name="%sAfterTargets"', r.name);
+		p.w('Category="General"');
+		p.w('EnumProvider="Targets"');
+		p.w('IncludeInCommandLine="False">');
+
+		p.push('<DynamicEnumProperty.DisplayName>');
+		p.w('<sys:String>Execute After</sys:String>');
+		p.pop('</DynamicEnumProperty.DisplayName>');
+
+		p.push('<DynamicEnumProperty.Description>');
+		p.w('<sys:String>Specifies the targets for the build customization to run after.</sys:String>');
+		p.pop('</DynamicEnumProperty.Description>');
+
+		p.push('<DynamicEnumProperty.ProviderSettings>');
+		p.push('<NameValuePair');
+		p.w('Name="Exclude"');
+		p.w('Value="^%sAfterTargets|^Compute" />', r.name);
+		p.pop();
+		p.pop('</DynamicEnumProperty.ProviderSettings>');
+
+		p.push('<DynamicEnumProperty.DataSource>');
+		p.push('<DataSource');
+		p.w('Persistence="ProjectFile"');
+		p.w('ItemType=""');
+		p.w('HasConfigurationCondition="true" />');
+		p.pop();
+		p.pop('</DynamicEnumProperty.DataSource>');
+
+		p.pop('</DynamicEnumProperty>');
+	}
+
+
+
+	function m.beforeTargets(r) {
+		p.push('<DynamicEnumProperty');
+		p.w('Name="%sBeforeTargets"', r.name);
+		p.w('Category="General"');
+		p.w('EnumProvider="Targets"');
+		p.w('IncludeInCommandLine="False">');
+
+		p.push('<DynamicEnumProperty.DisplayName>');
+		p.w('<sys:String>Execute Before</sys:String>');
+		p.pop('</DynamicEnumProperty.DisplayName>');
+
+		p.push('<DynamicEnumProperty.Description>');
+		p.w('<sys:String>Specifies the targets for the build customization to run before.</sys:String>');
+		p.pop('</DynamicEnumProperty.Description>');
+
+		p.push('<DynamicEnumProperty.ProviderSettings>');
+		p.push('<NameValuePair');
+		p.w('Name="Exclude"');
+		p.w('Value="^%sBeforeTargets|^Compute" />', r.name);
+		p.pop();
+		p.pop('</DynamicEnumProperty.ProviderSettings>');
+
+		p.push('<DynamicEnumProperty.DataSource>');
+		p.push('<DataSource');
+		p.w('Persistence="ProjectFile"');
+		p.w('HasConfigurationCondition="true" />');
+		p.pop();
+		p.pop('</DynamicEnumProperty.DataSource>');
+
+		p.pop('</DynamicEnumProperty>');
+	}
+
+
+
+	function m.commandLineTemplate(r) {
+		p.push('<StringProperty');
+		p.w('Name="CommandLineTemplate"');
+		p.w('DisplayName="Command Line"');
+		p.w('Visible="False"');
+		p.w('IncludeInCommandLine="False" />');
+		p.pop();
+	}
+
+
+
+	function m.contentType(r) {
+		p.push('<ContentType');
+		p.w('Name="%s"', r.name);
+		p.w('DisplayName="%s"', r.display || r.name);
+		p.w('ItemType="%s" />', r.name);
+		p.pop();
+	}
+
+
+
+	function m.dataSource(r) {
+		p.push('<Rule.DataSource>');
+		p.push('<DataSource');
+		p.w('Persistence="ProjectFile"');
+		p.w('ItemType="%s" />', r.name);
+		p.pop();
+		p.pop('</Rule.DataSource>');
+	}
+
+
+
+	function m.executionDescription(r) {
+		p.push('<StringProperty');
+		p.w('Name="ExecutionDescription"');
+		p.w('DisplayName="Execution Description"');
+		p.w('Visible="False"');
+		p.w('IncludeInCommandLine="False" />');
+		p.pop();
+	}
+
+
+
+	function m.fileExtension(r) {
+		for( _, v in ipairs(r.fileextension) ) {
+			p.push('<FileExtension');
+			p.w('Name="*%s"', v);
+			p.w('ContentType="%s" />', r.name);
+			p.pop();
+		}
+	}
+
+
+
+	function m.inputs(r) {
+		p.push('<StringListProperty');
+		p.w('Name="Inputs"');
+		p.w('Category="Command Line"');
+		p.w('IsRequired="true"');
+		p.w('Switch=" ">');
+
+		p.push('<StringListProperty.DataSource>');
+		p.push('<DataSource');
+		p.w('Persistence="ProjectFile"');
+		p.w('ItemType="%s"', r.name);
+		p.w('SourceType="Item" />');
+		p.pop();
+
+		p.pop('</StringListProperty.DataSource>');
+		p.pop('</StringListProperty>');
+	}
+
+
+
+	function m.outputs(r) {
+		p.push('<StringListProperty');
+		p.w('Name="Outputs"');
+		p.w('DisplayName="Outputs"');
+		p.w('Visible="False"');
+		p.w('IncludeInCommandLine="False" />');
+		p.pop();
+	}
+
+
+
+	function m.ruleItem(r) {
+		p.push('<ItemType');
+		p.w('Name="%s"', r.name);
+		p.w('DisplayName="%s" />', r.display || r.name);
+		p.pop();
+	}
+
+
+
+	function m.projectSchemaDefinitions(r) {
+		p.push('<ProjectSchemaDefinitions xmlns="http://schemas.microsoft.com/build/2009/properties" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:sys="clr-namespace:System;assembly=mscorlib">');
+	}
+

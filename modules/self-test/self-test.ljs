@@ -1,0 +1,91 @@
+//-
+// self-test/self-test.ljs
+//
+// An automated test framework for Premake and its add-on modules.
+//
+// Author Jason Perkins
+// Copyright (c) 2008-2016 Jason Perkins and the Premake project.
+//-
+
+
+	var p = premake;
+
+	p.modules.self_test = {};
+	var m = p.modules.self_test;
+
+	m._VERSION = p._VERSION;
+
+	
+
+	newaction ({
+		trigger = "self-test",
+		shortname  = "Test Premake",
+		description = "Run Premake's own local unit test suites",
+		execute = function() {
+			m.executeSelfTest();
+		}
+	});
+
+
+
+	newoption ({
+		trigger = "test-only",
+		value = "suite[.test]",
+		description = "For self-test action; run specific suite or test"
+	});
+
+
+
+	function m.executeSelfTest() {
+		m.detectDuplicateTests = true;
+		m.loadTestsFromManifests();
+		m.detectDuplicateTests = false;
+
+		var test, err = m.getTestWithIdentifier(_OPTIONS["test-only"]);
+		if( err ) {
+			error(err, 0);
+		}
+
+		var passed, failed = m.runTest(test);
+
+		if( failed > 0 ) {
+			printf("\n %d FAILED TEST%s", failed, failed > 1 ? "S" : "");
+			os.exit(5);
+		}
+	}
+
+
+
+	function m.loadTestsFromManifests() {
+		var mask = path.join(_MAIN_SCRIPT_DIR, "**/tests/_tests.ljs");
+		var manifests = os.matchfiles(mask);
+
+		// TODO: "**" should also match "." but doesn't currently
+		var top = path.join(_MAIN_SCRIPT_DIR, "tests/_tests.ljs");
+		if( os.isfile(top) ) {
+			table.insert(manifests, 1, top);
+		}
+
+		for( i = 1, #manifests ) {
+			var manifest = manifests[i];
+
+			_TESTS_DIR = path.getdirectory(manifest);
+	
+			var files = dofile(manifest);
+			for( xi = 1, #files ) {
+				var filename = path.join(_TESTS_DIR, files[xi]);
+				dofile(filename);
+			}
+		}
+	}
+
+
+
+	dofile("test_assertions.ljs");
+	dofile("test_declare.ljs");
+	dofile("test_helpers.ljs");
+	dofile("test_runner.ljs");
+
+
+
+	return m;

@@ -1,0 +1,202 @@
+//-
+// workspace.ljs
+// Work with the list of workspaces loaded from the script.
+// Copyright (c) 2002-2015 Jason Perkins and the Premake project
+//-
+
+	var p = premake;
+	p.workspace = p.api.container("workspace", p.global);
+
+	var workspace = p.workspace;
+
+
+//-
+// Switch this container's name from "solution" to "workspace"
+//
+// We changed these names on 30 Jul 2015. While it might be nice to leave
+// `solution()` around for Visual Studio folks and everyone still used to the
+// old system, it would be good to eventually deprecate and remove all of
+// the other, more internal uses of "solution" and "sln". Probably including
+// all uses of container class aliases, since we probably aren't going to
+// need those again (right?).
+//-
+
+	p.solution = workspace;
+	workspace.alias = "solution";
+
+	p.alias(_G, "workspace", "solution");
+	p.alias(_G, "externalworkspace", "externalsolution");
+
+
+
+//-
+// Create a new workspace container instance.
+//-
+
+	function workspace.new(name) {
+		var wks = p.container.new(workspace, name);
+		return wks;
+	}
+
+
+
+//
+// Iterate over the configurations of a workspace.
+//
+// @return
+//    A configuration iteration function.
+//
+
+	function workspace.eachconfig(this) {
+		this = p.oven.bakeWorkspace(this);
+
+		var i = 0;
+		return function() {
+			++i    ;
+			if( i > #this.configs ) {
+				return null;
+			} else {
+				return this.configs[i];
+			}
+		};
+	}
+
+
+//
+// Iterate over the projects of a workspace.
+//
+// @return
+//    An iterator function, returning project configurations.
+//
+
+	function workspace.eachproject(this) {
+		var i = 0;
+		return function () {
+			++i    ;
+			if( i <= #this.projects ) {
+				return p.workspace.getproject(this, i);
+			}
+		};
+	}
+
+
+//
+// Locate a project by name, case insensitive.
+//
+// @param name
+//    The name of the projec to find.
+// @return
+//    The project object, or nil if a matching project could not be found.
+//
+
+	function workspace.findproject(this, name) {
+		name = name->lower();
+		for( _, prj in ipairs(this.projects) ) {
+			if( name == prj.name->lower() ) {
+				return prj;
+			}
+		}
+		return null;
+	}
+
+
+//
+// Retrieve the tree of project groups.
+//
+// @return
+//    The tree of project groups defined for the workspace.
+//
+
+	function workspace.grouptree(this) {
+		// check for a previously cached tree
+		if( this.grouptree ) {
+			return this.grouptree;
+		}
+
+		// build the tree of groups
+
+		var tr = p.tree.new();
+		for( prj in workspace.eachproject(this) ) {
+			var prjpath = path.join(prj.group, prj.name);
+			var node = p.tree.add(tr, prjpath);
+			node.project = prj;
+		}
+
+		// assign UUIDs to each node in the tree
+		p.tree.traverse(tr, {
+			onbranch = function(node) {
+				node.uuid = os.uuid("group:" .. node.path);
+			}
+		});
+
+		// sort by uuid for determinism.
+		p.tree.sort(tr, function(a,b) {
+			return a.name < b.name;
+		});
+
+		this.grouptree = tr;
+		return tr;
+	}
+
+
+//
+// Retrieve the project configuration at a particular index.
+//
+// @param idx
+//    An index into the array of projects.
+// @return
+//    The project configuration at the given index.
+//
+
+	function workspace.getproject(this, idx) {
+		this = p.oven.bakeWorkspace(this);
+		return this.projects[idx];
+	}
+
+
+
+//-
+// Determines if the workspace contains a project that meets certain criteria.
+//
+// @param func
+//    A test function. Receives a project as its only argument and returns a
+//    boolean indicating whether it meets to matching criteria.
+// @return
+//    True if the test function returned true.
+//-
+
+	function workspace.hasProject(this, func) {
+		return p.container.hasChild(this, p.project, func);
+	}
+
+
+//
+// Return the relative path from the solution to the specified file.
+//
+// @param self
+//    The workspace object to query.
+// @param filename
+//    The file path, or an array of file paths, to convert.
+// @return
+//    The relative path, or array of paths, from the workspace to the file.
+//
+
+	function workspace.getrelative(this, filename) {
+		if( type(filename) == "table" ) {
+			var result = {};
+			for( i, name in ipairs(filename) ) {
+				if( name && #name > 0 ) {
+					table.insert(result, workspace.getrelative(this, name));
+				}
+			}
+			return result;
+		} else {
+			if( filename ) {
+				var result = filename;
+				if( path.hasdeferredjoin(result) ) {
+					result = path.resolvedeferredjoin(result);
+				}
+				return path.getrelative(this.location, result);
+			}
+		}
+	}

@@ -1,0 +1,40 @@
+//
+// tests/actions/make/cpp/test_flags.ljs
+// Tests compiler and linker flags for Makefiles.
+// Copyright (c) 2012-2015 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("make_flags");
+	var make = p.make;
+	var project = p.project;
+
+
+//
+// Setup
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare(calls) {
+		var cfg = test.getconfig(prj, "Debug");
+		var toolset = p.tools.gcc;
+		p.callarray(make, calls, cfg, toolset);
+	}
+
+
+//
+// Include directories should be relative and space separated.
+//
+
+	function suite.includeDirs() {
+		includedirs ({ "src/include", "../include" });
+		prepare ({ "includes" });
+		test.capture ([=[
+  INCLUDES += -Isrc/include -I../include
+		]=]);
+	}

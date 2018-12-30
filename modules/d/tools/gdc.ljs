@@ -1,0 +1,327 @@
+//
+// d/tools/gdc.ljs
+// Provides GDC-specific configuration strings.
+// Copyright (c) 2013-2015 Andrew Gough, Manu Evans, and the Premake project
+//
+
+	var p = premake;
+	p.tools.gdc = { };
+
+	var gdc = p.tools.gdc;
+	var project = p.project;
+	var config = p.config;
+	var d = p.modules.d;
+
+	//
+	// Set default tools
+	//
+
+	gdc.dc = "gdc";
+
+
+//
+// Returns list of D compiler flags for a configuration.
+//
+
+	gdc.dflags = {
+		architecture = {
+			x86 = "-m32",
+			x86_64 = "-m64",
+		},
+		flags = {
+			Documentation			= "-fdoc",
+			FatalWarnings			= "-Werror",
+			GenerateHeader			= "-fintfc",
+			GenerateJSON			= "-fX",
+//			Release					= "-frelease",
+			RetainPaths				= "-op",
+			SymbolsLikeC			= "-fdebug-c",
+			UnitTest				= "-funittest",
+			Verbose					= "-fd-verbose",
+			// THESE ARE THE DMD ARGS...
+//			ProfileGC				= "-profile=gc",
+//			StackFrame				= "-gs",
+//			StackStomp				= "-gx",
+//			AllTemplateInst			= "-allinst",
+//			BetterC					= "-betterC",
+//			Main					= "-main",
+//			PerformSyntaxCheckOnly	= "-o-",
+			ShowTLS					= "-fd-vtls",
+//			ShowGC					= "-vgc",
+//			IgnorePragma			= "-ignore",
+			ShowDependencies		= "-fdeps",
+		},
+		boundscheck = {
+			Off = "-fno-bounds-check",
+//			On = "-boundscheck=on",
+//			SafeOnly = "-boundscheck=safeonly",
+		},
+		deprecatedfeatures = {
+			Allow = "-fdeprecated",
+//			Warn = "-dw",
+//			Error = "-de",
+		},
+		floatingpoint = {
+			Fast = "-ffast-math",
+			Strict = "-ffloat-store",
+		},
+		optimize = {
+			Off = "-O0",
+			On = "-O2 -finline-functions",
+			Debug = "-Og",
+			Full = "-O3 -finline-functions",
+			Size = "-Os -finline-functions",
+			Speed = "-O3 -finline-functions",
+		},
+		pic = {
+			On = "-fPIC",
+		},
+		vectorextensions = {
+			AVX = "-mavx",
+			SSE = "-msse",
+			SSE2 = "-msse2",
+		},
+		warnings = {
+//			Default = "-w",	-- TODO: check this...
+			High = "-Wall",
+			Extra = "-Wall -Wextra",
+		},
+		symbols = {
+			On = "-g",
+			FastLink = "-g",
+			Full = "-g -gf",
+		}
+	};
+
+	function gdc.getdflags(cfg) {
+		var flags = config.mapFlags(cfg, gdc.dflags);
+
+		if( config.isDebugBuild(cfg) ) {
+			table.insert(flags, "-fdebug");
+		} else {
+			table.insert(flags, "-frelease");
+		}
+
+		if( cfg.flags.Documentation ) {
+			if( cfg.docname ) {
+				table.insert(flags, "-fdoc-file=" .. p.quoted(cfg.docname));
+			}
+			if( cfg.docdir ) {
+				table.insert(flags, "-fdoc-dir=" .. p.quoted(cfg.docdir));
+			}
+		}
+		if( cfg.flags.GenerateHeader ) {
+			if( cfg.headername ) {
+				table.insert(flags, "-fintfc-file=" .. p.quoted(cfg.headername));
+			}
+			if( cfg.headerdir ) {
+				table.insert(flags, "-fintfc-dir=" .. p.quoted(cfg.headerdir));
+			}
+		}
+
+		return flags;
+	}
+
+
+//
+// Decorate versions for the DMD command line.
+//
+
+	function gdc.getversions(versions, level) {
+		var result = {};
+		for( _, version in ipairs(versions) ) {
+			table.insert(result, '-fversion=' .. version);
+		}
+		if( level ) {
+			table.insert(result, '-fversion=' .. level);
+		}
+		return result;
+	}
+
+
+//
+// Decorate debug constants for the DMD command line.
+//
+
+	function gdc.getdebug(constants, level) {
+		var result = {};
+		for( _, constant in ipairs(constants) ) {
+			table.insert(result, '-fdebug=' .. constant);
+		}
+		if( level ) {
+			table.insert(result, '-fdebug=' .. level);
+		}
+		return result;
+	}
+
+
+//
+// Decorate import file search paths for the DMD command line.
+//
+
+	function gdc.getimportdirs(cfg, dirs) {
+		var result = {};
+		for( _, dir in ipairs(dirs) ) {
+			dir = project.getrelative(cfg.project, dir);
+			table.insert(result, '-I' .. p.quoted(dir));
+		}
+		return result;
+	}
+
+
+//
+// Decorate import file search paths for the DMD command line.
+//
+
+	function gdc.getstringimportdirs(cfg, dirs) {
+		var result = {};
+		for( _, dir in ipairs(dirs) ) {
+			dir = project.getrelative(cfg.project, dir);
+			table.insert(result, '-J' .. p.quoted(dir));
+		}
+		return result;
+	}
+
+
+//
+// Returns the target name specific to compiler
+//
+
+	function gdc.gettarget(name) {
+		return "-o " .. name;
+	}
+
+
+//
+// Return a list of LDFLAGS for a specific configuration.
+//
+
+	gdc.ldflags = {
+		architecture = {
+			x86 = { "-m32" },
+			x86_64 = { "-m64" },
+		},
+		kind = {
+			SharedLib = function(cfg) {
+				var r = { (cfg.system == p.MACOSX ? "-dynamiclib" : "-shared") };
+				if( cfg.system == "windows" && ! cfg.flags.NoImportLib ) {
+					table.insert(r, '-Wl,--out-implib="' .. cfg.linktarget.relpath .. '"');
+				}
+				return r;
+			},
+			WindowedApp = function(cfg) {
+				if( cfg.system == p.WINDOWS ) { return "-mwindows"; }
+			},
+		},
+	};
+
+	function gdc.getldflags(cfg) {
+		var flags = config.mapFlags(cfg, gdc.ldflags);
+		return flags;
+	}
+
+
+//
+// Return a list of decorated additional libraries directories.
+//
+
+	gdc.libraryDirectories = {
+		architecture = {
+			x86 = "-L/usr/lib",
+			x86_64 = "-L/usr/lib64",
+		}
+	};
+
+	function gdc.getLibraryDirectories(cfg) {
+		var flags = config.mapFlags(cfg, gdc.libraryDirectories);
+
+		// Scan the list of linked libraries. If any are referenced with
+		// paths, add those to the list of library search paths
+		for( _, dir in ipairs(config.getlinks(cfg, "system", "directory")) ) {
+			table.insert(flags, '-Wl,-L' .. project.getrelative(cfg.project, dir));
+		}
+
+		return flags;
+	}
+
+
+//
+// Return the list of libraries to link, decorated with flags as needed.
+//
+
+	function gdc.getlinks(cfg, systemonly) {
+		var result = {};
+
+		var links;
+		if( ! systemonly ) {
+			links = config.getlinks(cfg, "siblings", "object");
+			for( _, link in ipairs(links) ) {
+				// skip external project references, since I have no way
+				// to know the actual output target path
+				if( ! link.project.external ) {
+					if( link.kind == p.STATICLIB ) {
+						// Don't use "-l" flag when linking static libraries; instead use
+						// path/libname.a to avoid linking a shared library of the same
+						// name if one is present
+						table.insert(result, "-Wl," .. project.getrelative(cfg.project, link.linktarget.abspath));
+					} else {
+						table.insert(result, "-Wl,-l" .. link.linktarget.basename);
+					}
+				}
+			}
+		}
+
+		// The "-l" flag is fine for system libraries
+		links = config.getlinks(cfg, "system", "fullpath");
+		for( _, link in ipairs(links) ) {
+			if( path.isframework(link) ) {
+				table.insert(result, "-framework " .. path.getbasename(link));
+			} else if( path.isobjectfile(link) ) {
+				table.insert(result, "-Wl," .. link);
+			} else {
+				table.insert(result, "-Wl,-l" .. path.getbasename(link));
+			}
+		}
+
+		return result;
+	}
+
+
+//
+// Returns makefile-specific configuration rules.
+//
+
+	gdc.makesettings = {
+	};
+
+	function gdc.getmakesettings(cfg) {
+		var settings = config.mapFlags(cfg, gdc.makesettings);
+		return table.concat(settings);
+	}
+
+
+//
+// Retrieves the executable command name for a tool, based on the
+// provided configuration and the operating environment.
+//
+// @param cfg
+//    The configuration to query.
+// @param tool
+//    The tool to fetch, one of "dc" for the D compiler, or "ar" for the static linker.
+// @return
+//    The executable command name for a tool, or nil if the system's
+//    default value should be used.
+//
+
+	gdc.tools = {
+		ps3 = {
+			dc = "ppu-lv2-gdc",
+			ar = "ppu-lv2-ar",
+		},
+	};
+
+	function gdc.gettoolname(cfg, tool) {
+		var names = gdc.tools[cfg.architecture] || gdc.tools[cfg.system] || {};
+		var name = names[tool];
+		return name || gdc[tool];
+	}

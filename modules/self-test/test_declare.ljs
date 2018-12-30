@@ -1,0 +1,198 @@
+//-
+// test_declare.ljs
+//
+// Declare unit test suites, and fetch tests from them.
+//
+// Author Jason Perkins
+// Copyright (c) 2008-2016 Jason Perkins and the Premake project.
+//-
+
+	var p = premake;
+	var m = p.modules.self_test;
+
+	var _ = {};
+
+
+	_.suites = {};
+	_.suppressed = {};
+
+
+
+//-
+// Declare a new test suite.
+//
+// @param suiteName
+//    A unique name for the suite. This name will be displayed as part of
+//    test failure messages, and also to select the suite when using the
+//    `--test-only` command line parameter. Best to avoid spaces and special
+//    characters which might not be command line friendly. An error will be
+//    raised if the name is not unique.
+// @return
+//    The new test suite object.
+//-
+
+	function m.declare(suiteName) {
+		if( _.suites[suiteName] ) {
+			error('Duplicate test suite "'.. suiteName .. '"', 2);
+		}
+
+		var _suite = {};
+		// Setup a metatable for the test suites to use, this will catch duplicate tests
+		var suite = setmetatable({}, {
+			__index = _suite,
+			__newindex = function (table, key, value) {
+				if( m.detectDuplicateTests && _suite[key] != null ) {
+					error('Duplicate test "'.. key .. '"', 2);
+				}
+				_suite[key] = value;
+			},
+			__pairs = function (table) { return pairs(_suite); },
+			__ipairs = function (table) { return ipairs(_suite); },
+		});
+
+		suite._SCRIPT_DIR = _SCRIPT_DIR;
+		suite._TESTS_DIR = _TESTS_DIR;
+
+		_.suites[suiteName] = suite;
+		return suite;
+	}
+
+
+
+//-
+// Prevent a particular test or suite of tests from running.
+//
+// @param identifier
+//    A test or suite identifier, indicating which tests should be suppressed,
+//    in the form "suiteName" or "suiteName.testName".
+//-
+
+	function m.suppress(identifier) {
+		if( type(identifier) == "table" ) {
+			for( i = 1, #identifier ) {
+				m.suppress(identifier[i]);
+			}
+		} else {
+			_.suppressed[identifier] = true;
+		}
+	}
+
+
+
+	function m.isSuppressed(identifier) {
+		return _.suppressed[identifier];
+	}
+
+
+
+//-
+// Returns true if the provided test object represents a valid test.
+//-
+
+	function m.isValid(test) {
+		if( type(test.testFunction) != "function" ) {
+			return false;
+		}
+		if( test.testName == "setup" || test.testName == "teardown" ) {
+			return false;
+		}
+		return true;
+	}
+
+
+
+//-
+// Return the table of declared test suites.
+//-
+
+	function m.getSuites() {
+		return _.suites;
+	}
+
+
+
+//-
+// Fetch a test object via its string identifier.
+//
+// @param identifier
+//    An optional test or suite identifier, indicating which tests should be
+//    run, in the form "suiteName" or "suiteName.testName". If not specified,
+//    the global test object, representing all test suites, will be returned.
+// @return
+//    On success, returns a test object, which should be considered opaque.
+//    On failure, returns `nil` and an error.
+//-
+
+	function m.getTestWithIdentifier(identifier) {
+		var suiteName, testName = m.parseTestIdentifier(identifier);
+
+		var suite, test, err = _.checkTestIdentifier(_.suites, suiteName, testName);		
+		if( err ) {
+			return null, err;
+		}
+
+		return {
+			suiteName = suiteName,
+			suite = suite,
+			testName = testName,
+			testFunction = test
+		};
+	}
+
+
+
+//-
+// Parse a test identifier and split it into separate suite and test names.
+//
+// @param identifier
+//    A test identifier, which may be nil or an empty string, a test suite 
+//    name, or a suite and test with the format "suiteName.testName".
+// @return
+//    Two values: the suite name and the test name, or nil if not included
+//    in the identifier.
+//-
+
+	function m.parseTestIdentifier(identifier) {
+		var suiteName, testName;
+		if( identifier ) {
+			var parts = string.explode(identifier, ".", true);
+			suiteName = (parts[1] != "" ? parts[1] : null);
+			testName = (parts[2] != "" ? parts[2] : null);
+		}
+		return suiteName, testName;
+	}
+
+
+
+	function _.checkTestIdentifier(suites, suiteName, testName) {
+		var suite, test;
+
+		if( suiteName ) {
+			suite = suites[suiteName];
+			if( ! suite ) {
+				return null, null, "No such test suite '" .. suiteName .. "'";
+			}
+
+			if( testName ) {
+				test = suite[testName];
+				if( ! _.isValidTestPair(testName, test) ) {
+					return null, null, "No such test '" .. suiteName .. "." .. testName .. "'";
+				}
+			}
+		}
+
+		return suite, test;
+	}
+
+
+	function _.isValidTestPair(testName, testFunc) {
+		if( type(testFunc) != "function" ) {
+			return false;
+		}
+
+		if( testName == "setup" || testName == "teardown" ) {
+			return false;
+		}
+
+		return true;
+	}

@@ -1,0 +1,258 @@
+//-
+// xcode/xcode4_project.ljs
+// Generate an Xcode project file.
+// Author Jason Perkins
+// Modified by Mihai Sebea
+// Copyright (c) 2009-2015 Jason Perkins and the Premake project
+//-
+
+	var p = premake;
+	var m = p.modules.xcode;
+
+	var xcode = p.modules.xcode;
+	var project = p.project;
+	var config = p.config;
+	var fileconfig = p.fileconfig;
+	var tree = p.tree;
+
+//
+// Checks if a node must be excluded completely from a target or not. It will
+// return true only if the node has the "ExcludeFromBuild" flag in all the
+// configurations.
+//
+// @param node
+//    The node to check.
+// @param prj
+//    The project being generated.
+// @returns
+//    A boolean, telling whether the node must be excluded from its target or not.
+//
+	function xcode.mustExcludeFromTarget(node, prj) {
+		if( ! node.configs ) {
+			return false;
+		}
+
+		var value;
+		for( cfg in premake.project.eachconfig(prj) ) {
+			var filecfg = premake.fileconfig.getconfig(node, cfg);
+			if( filecfg ) {
+				var newValue = ! ! filecfg.flags.ExcludeFromBuild;
+				if( value == null ) {
+					value = newValue;
+				} else if( value != newValue ) {
+					p.warn(node.name .. " is excluded in just some configurations. Autocompletion will not work correctly on this file in Xcode.");
+					return false;
+				}
+			}
+		}
+		return value;
+	}
+
+//
+// Create a tree corresponding to what is shown in the Xcode project browser
+// pane, with nodes for files and folders, resources, frameworks, and products.
+//
+// @param prj
+//    The project being generated.
+// @returns
+//    A tree, loaded with metadata, which mirrors Xcode's view of the project.
+//
+
+	function xcode.buildprjtree(prj) {
+		var tr = project.getsourcetree(prj, null , false);
+		tr.project = prj;
+
+		// create a list of build configurations and assign IDs
+		tr.configs = {};
+
+		for( cfg in project.eachconfig(prj) ) {
+			cfg.xcode = {};
+			cfg.xcode.targetid = xcode.newid(prj.xcode.projectnode.name, cfg.buildcfg, "target");
+			cfg.xcode.projectid = xcode.newid(tr.name, cfg.buildcfg);
+			table.insert(tr.configs, cfg);
+		}
+
+		// convert localized resources from their filesystem layout (English.lproj/MainMenu.xib)
+		// to Xcode's display layout (MainMenu.xib/English).
+		tree.traverse(tr, {
+			onbranch = function(node) {
+				if( path.getextension(node.name) == ".lproj" ) {
+					var lang = path.getbasename(node.name);  // "English", "French", etc.
+
+					// create a new language group for each file it contains
+					for( _, filenode in ipairs(node.children) ) {
+						var grpnode = node.parent.children[filenode.name];
+						if( ! grpnode ) {
+							grpnode = tree.insert(node.parent, tree.new(filenode.name));
+							grpnode.kind = "vgroup";
+						}
+
+						// convert the file node to a language node and add to the group
+						filenode.name = path.getbasename(lang);
+						tree.insert(grpnode, filenode);
+					}
+
+					// remove this directory from the tree
+					tree.remove(node);
+				}
+			}
+		});
+
+		// the special folder "Frameworks" lists all linked frameworks
+		tr.frameworks = tree.new("Frameworks");
+		for( cfg in project.eachconfig(prj) ) {
+			for( _, link in ipairs(config.getlinks(cfg, "system", "fullpath")) ) {
+				var name = path.getname(link);
+				if( xcode.isframework(name) && ! tr.frameworks.children[name] ) {
+					node = tree.insert(tr.frameworks, tree.new(name));
+					node.path = link;
+				}
+			}
+		}
+
+		// only add it to the tree if there are frameworks to link
+		if( #tr.frameworks.children > 0 ) {
+			tree.insert(tr, tr.frameworks);
+		}
+
+		// the special folder "Products" holds the target produced by the project; this
+		// is populated below
+		tr.products = tree.insert(tr, tree.new("Products"));
+
+		// the special folder "Projects" lists sibling project dependencies
+		tr.projects = tree.new("Projects");
+		for( _, dep in ipairs(project.getdependencies(prj, "linkOnly")) ) {
+			xcode.addDependency(prj, tr, dep, true);
+		}
+		for( _, dep in ipairs(project.getdependencies(prj, "dependOnly")) ) {
+			xcode.addDependency(prj, tr, dep, false);
+		}
+
+		if( #tr.projects.children > 0 ) {
+			tree.insert(tr, tr.projects);
+		}
+
+		// Final setup
+		tree.traverse(tr, {
+			onnode = function(node) {
+				// assign IDs to every node in the tree
+				node.id = xcode.newid(node.name, null, node.path);
+
+				node.isResource = xcode.isItemResource(prj, node);
+
+				// check to see if this file has custom build
+				if( node.configs ) {
+					for( cfg in project.eachconfig(prj) ) {
+						var filecfg = fileconfig.getconfig(node, cfg);
+						if( fileconfig.hasCustomBuildRule(filecfg) ) {
+							if( ! node.buildcommandid ) {
+								node.buildcommandid = xcode.newid(node.name, "buildcommand", node.path);
+							}
+						}
+					}
+				}
+
+				// assign build IDs to buildable files
+				if( xcode.getbuildcategory(node) && ! node.excludefrombuild && ! xcode.mustExcludeFromTarget(node, tr.project) ) {
+					node.buildid = xcode.newid(node.name, "build", node.path);
+				}
+
+				// remember key files that are needed elsewhere
+				if( string.endswith(node.name, "Info.plist") ) {
+					tr.infoplist = node;
+				}
+			}
+		}, true);
+
+		// Plug in the product node into the Products folder in the tree. The node
+		// was built in xcode.prepareWorkspace() in xcode_common.ljs; it contains IDs
+		// that are necessary for inter-project dependencies
+		node = tree.insert(tr.products, prj.xcode.projectnode);
+		node.kind = "product";
+		node.path = node.cfg.buildtarget.fullpath;
+		node.cfgsection = xcode.newid(node.name, "cfg");
+		node.resstageid = xcode.newid(node.name, "rez");
+		node.sourcesid  = xcode.newid(node.name, "src");
+		node.fxstageid  = xcode.newid(node.name, "fxs");
+
+		return tr;
+	}
+
+	function xcode.addDependency(prj, tr, dep, build) {
+		// create a child node for the dependency's xcodeproj
+		var xcpath = xcode.getxcodeprojname(dep);
+		var xcnode = tree.insert(tr.projects, tree.new(path.getname(xcpath)));
+		xcnode.path = xcpath;
+		xcnode.project = dep;
+		xcnode.productgroupid = xcode.newid(xcnode.name, "prodgrp");
+		xcnode.productproxyid = xcode.newid(xcnode.name, "prodprox");
+		xcnode.targetproxyid  = xcode.newid(xcnode.name, "targprox");
+		xcnode.targetdependid = xcode.newid(xcnode.name, "targdep");
+
+		// create a grandchild node for the dependency's link target
+		var lprj = p.workspace.findproject(prj.workspace, dep.name);
+		var cfg = project.findClosestMatch(lprj, prj.configurations[1]);
+		node = tree.insert(xcnode, tree.new(cfg.linktarget.name));
+		node.path = cfg.linktarget.fullpath;
+		node.cfg = cfg;
+
+		// don't link the dependency if it's a dependency only
+		if( build == false ) {
+			node.excludefrombuild = true;
+		}
+	}
+
+
+//-
+// Generate an Xcode .xcodeproj for a Premake project.
+//-
+
+	m.elements.project = function(prj) {
+		return {
+			m.header,
+		};
+	};
+
+	function m.generateProject(prj) {
+		var tr = xcode.buildprjtree(prj);
+		p.callArray(m.elements.project, prj);
+		xcode.PBXBuildFile(tr);
+		xcode.PBXContainerItemProxy(tr);
+		xcode.PBXFileReference(tr);
+		xcode.PBXFrameworksBuildPhase(tr);
+		xcode.PBXGroup(tr);
+		xcode.PBXNativeTarget(tr);
+		xcode.PBXAggregateTarget(tr);
+		xcode.PBXProject(tr);
+		xcode.PBXReferenceProxy(tr);
+		xcode.PBXResourcesBuildPhase(tr);
+		xcode.PBXShellScriptBuildPhase(tr);
+		xcode.PBXSourcesBuildPhase(tr);
+		xcode.PBXTargetDependency(tr);
+		xcode.PBXVariantGroup(tr);
+		xcode.XCBuildConfiguration(tr);
+		xcode.XCBuildConfigurationList(tr);
+		xcode.footer(prj);
+	}
+
+
+
+	function m.header(prj) {
+		p.w('// !$*UTF8*$!');
+		p.push('{');
+		p.w('archiveVersion = 1;');
+		p.w('classes = {');
+		p.w('};');
+		p.w('objectVersion = 46;');
+		p.push('objects = {');
+		p.w();
+	}
+
+
+
+	function xcode.footer(prj) {
+		p.pop('};');
+		p.w('rootObject = 08FB7793FE84155DC02AAC07 /* Project object */;');
+		p.pop('}');
+	}
+

@@ -1,0 +1,71 @@
+//
+// _manifest.ljs
+// Manage the list of built-in Premake scripts.
+// Copyright (c) 2002-2015 Jason Perkins and the Premake project
+//
+
+// The master list of built-in scripts. Order is important! If you want to
+// build a new script into Premake, add it to this list.
+
+	return
+	{
+		// core files
+		"base/_foundation.ljs",
+		"base/string.ljs",
+		"base/table.ljs",
+		"base/path.ljs",
+		"base/os.ljs",
+		"base/io.ljs",
+		"base/tools.ljs",
+		"base/tree.ljs",
+		"base/globals.ljs",
+		"base/moduledownloader.ljs",
+		"base/semver.ljs",
+		"base/http.ljs",
+		"base/json.ljs",
+		"base/jsonwrapper.ljs",
+		"base/languages.ljs",
+		"base/term.ljs",
+
+		// configuration data
+		"base/field.ljs",
+		"base/criteria.ljs",
+		"base/detoken.ljs",
+		"base/configset.ljs",
+		"base/context.ljs",
+		"base/container.ljs",
+
+		// runtime switches
+		"base/option.ljs",
+		"base/action.ljs",
+
+		// project script setup
+		"base/api.ljs",
+
+		// project objects
+		"base/global.ljs",
+		"base/workspace.ljs",
+		"base/group.ljs",
+		"base/project.ljs",
+		"base/config.ljs",
+		"base/fileconfig.ljs",
+		"base/rule.ljs",
+
+		// project script processing
+		"base/oven.ljs",
+		"base/validation.ljs",
+		"base/premake.ljs",
+		"base/help.ljs",
+
+		// tool APIs
+		"tools/dotnet.ljs",
+		"tools/gcc.ljs",
+		"tools/msc.ljs",
+		"tools/snc.ljs",
+		"tools/clang.ljs",
+
+		// Clean action
+		"actions/clean/_clean.ljs",
+
+		"_premake_init.ljs",
+	};

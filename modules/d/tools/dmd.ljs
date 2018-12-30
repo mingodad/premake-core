@@ -1,0 +1,437 @@
+//
+// d/tools/dmd.ljs
+// Provides dmd-specific configuration strings.
+// Copyright (c) 2013-2015 Andrew Gough, Manu Evans, and the Premake project
+//
+
+	var tdmd = {};
+
+	var p = premake;
+	var project = p.project;
+	var config = p.config;
+	var d = p.modules.d;
+
+//
+// Set default tools
+//
+	tdmd.gcc = {};
+	tdmd.gcc.dc = "dmd";
+
+	tdmd.optlink = {};
+	tdmd.optlink.dc = "dmd";
+
+
+// /////////////////////////////////////////////////////////////////////////
+// dmd + GCC toolchain
+// /////////////////////////////////////////////////////////////////////////
+
+//
+// Return a list of LDFLAGS for a specific configuration.
+//
+
+	tdmd.gcc.ldflags = {
+		architecture = {
+			x86 = { "-m32" },
+			x86_64 = { "-m64" },
+		},
+		kind = {
+			SharedLib = "-shared",
+			StaticLib = "-lib",
+		}
+	};
+
+	function tdmd.gcc.getldflags(cfg) {
+		var flags = config.mapFlags(cfg, tdmd.gcc.ldflags);
+		return flags;
+	}
+
+
+//
+// Return a list of decorated additional libraries directories.
+//
+
+	tdmd.gcc.libraryDirectories = {
+		architecture = {
+			x86 = "-L-L/usr/lib",
+			x86_64 = "-L-L/usr/lib64",
+		}
+	};
+
+	function tdmd.gcc.getLibraryDirectories(cfg) {
+		var flags = config.mapFlags(cfg, tdmd.gcc.libraryDirectories);
+
+		// Scan the list of linked libraries. If any are referenced with
+		// paths, add those to the list of library search paths
+		for( _, dir in ipairs(config.getlinks(cfg, "system", "directory")) ) {
+			table.insert(flags, '-L-L' .. project.getrelative(cfg.project, dir));
+		}
+
+		return flags;
+	}
+
+
+//
+// Return the list of libraries to link, decorated with flags as needed.
+//
+
+	function tdmd.gcc.getlinks(cfg, systemonly) {
+		var result = {};
+
+		var links;
+		if( ! systemonly ) {
+			links = config.getlinks(cfg, "siblings", "object");
+			for( _, link in ipairs(links) ) {
+				// skip external project references, since I have no way
+				// to know the actual output target path
+				if( ! link.project.external ) {
+					if( link.kind == p.STATICLIB ) {
+						// Don't use "-l" flag when linking static libraries; instead use
+						// path/libname.a to avoid linking a shared library of the same
+						// name if one is present
+						table.insert(result, "-L" .. project.getrelative(cfg.project, link.linktarget.abspath));
+					} else {
+						table.insert(result, "-L-l" .. link.linktarget.basename);
+					}
+				}
+			}
+		}
+
+		// The "-l" flag is fine for system libraries
+		links = config.getlinks(cfg, "system", "fullpath");
+		for( _, link in ipairs(links) ) {
+			if( path.isframework(link) ) {
+				table.insert(result, "-framework " .. path.getbasename(link));
+			} else if( path.isobjectfile(link) ) {
+				table.insert(result, "-L" .. link);
+			} else {
+				table.insert(result, "-L-l" .. path.getbasename(link));
+			}
+		}
+
+		return result;
+	}
+
+
+// /////////////////////////////////////////////////////////////////////////
+// tdmd + OPTLINK toolchain
+// /////////////////////////////////////////////////////////////////////////
+
+//
+// Return a list of LDFLAGS for a specific configuration.
+//
+
+	tdmd.optlink.ldflags = {
+		architecture = {
+			x86 = { "-m32" },
+			x86_64 = { "-m64" },
+		},
+		kind = {
+			SharedLib = "-shared",
+			StaticLib = "-lib",
+		}
+	};
+
+	function tdmd.optlink.getldflags(cfg) {
+		var flags = config.mapFlags(cfg, tdmd.optlink.ldflags);
+		return flags;
+	}
+
+
+//
+// Return a list of decorated additional libraries directories.
+//
+
+	function tdmd.optlink.getLibraryDirectories(cfg) {
+		var flags = {};
+
+		// Scan the list of linked libraries. If any are referenced with
+		// paths, add those to the list of library search paths
+		for( _, dir in ipairs(config.getlinks(cfg, "system", "directory")) ) {
+			table.insert(flags, '-Llib "' .. project.getrelative(cfg.project, dir) .. '"');
+		}
+
+		return flags;
+	}
+
+
+//
+// Returns a list of linker flags for library names.
+//
+
+	function tdmd.optlink.getlinks(cfg) {
+		var result = {};
+
+		var links = config.getlinks(cfg, "dependencies", "object");
+		for( _, link in ipairs(links) ) {
+			// skip external project references, since I have no way
+			// to know the actual output target path
+			if( ! link.project.externalname ) {
+				var linkinfo = config.getlinkinfo(link);
+				if( link.kind == p.STATICLIB ) {
+					table.insert(result, project.getrelative(cfg.project, linkinfo.abspath));
+				}
+			}
+		}
+
+		// The "-l" flag is fine for system libraries
+		links = config.getlinks(cfg, "system", "basename");
+		for( _, link in ipairs(links) ) {
+			if( path.isobjectfile(link) ) {
+				table.insert(result, link);
+			} else if( path.hasextension(link, p.systems[cfg.system].staticlib.extension) ) {
+				table.insert(result, link);
+			}
+		}
+
+		return result;
+
+	}
+
+
+// /////////////////////////////////////////////////////////////////////////
+// common dmd code (either toolchain)
+// /////////////////////////////////////////////////////////////////////////
+
+	// if we are compiling on windows, we need to specialise to OPTLINK as the linker
+// OR!!!			if cfg.system ~= p.WINDOWS then
+	if( string.match( os.getversion().description, "Windows" ) != null ) {
+		// TODO: on windows, we may use OPTLINK or MSLINK (for Win64)...
+//		printf("TODO: select proper linker for 32/64 bit code")
+
+		p.tools.dmd = tdmd.optlink;
+	} else {
+		p.tools.dmd = tdmd.gcc;
+	}
+
+	var dmd = p.tools.dmd;
+
+
+//
+// Returns list of D compiler flags for a configuration.
+//
+
+	dmd.dflags = {
+		architecture = {
+			x86 = "-m32mscoff",
+			x86_64 = "-m64",
+		},
+		flags = {
+			OmitDefaultLibrary		= "-mscrtlib=",
+			CodeCoverage			= "-cov",
+			Documentation			= "-D",
+			FatalWarnings			= "-w",
+			GenerateHeader			= "-H",
+			GenerateJSON			= "-X",
+			GenerateMap				= "-map",
+			Profile					= "-profile",
+			Quiet					= "-quiet",
+//			Release					= "-release",
+			RetainPaths				= "-op",
+			SymbolsLikeC			= "-gc",
+			UnitTest				= "-unittest",
+			Verbose					= "-v",
+			ProfileGC				= "-profile=gc",
+			StackFrame				= "-gs",
+			StackStomp				= "-gx",
+			AllTemplateInst			= "-allinst",
+			BetterC					= "-betterC",
+			Main					= "-main",
+			PerformSyntaxCheckOnly	= "-o-",
+			ShowTLS					= "-vtls",
+			ShowGC					= "-vgc",
+			IgnorePragma			= "-ignore",
+			ShowDependencies		= "-deps",
+		},
+		boundscheck = {
+			Off = "-boundscheck=off",
+			On = "-boundscheck=on",
+			SafeOnly = "-boundscheck=safeonly",
+		},
+		deprecatedfeatures = {
+			Allow = "-d",
+			Warn = "-dw",
+			Error = "-de",
+		},
+		floatingpoint = {
+			None = "-nofloat",
+		},
+		optimize = {
+			On = "-O -inline",
+			Full = "-O -inline",
+			Size = "-O -inline",
+			Speed = "-O -inline",
+		},
+		pic = {
+			On = "-fPIC",
+		},
+		warnings = {
+			Default = "-wi",
+			High = "-wi",
+			Extra = "-wi",
+		},
+		symbols = {
+			On = "-g",
+			FastLink = "-g",
+			Full = "-g",
+		}
+	};
+
+	function dmd.getdflags(cfg) {
+		var flags = config.mapFlags(cfg, dmd.dflags);
+
+		if( config.isDebugBuild(cfg) ) {
+			table.insert(flags, "-debug");
+		} else {
+			table.insert(flags, "-release");
+		}
+
+		if( ! cfg.flags.OmitDefaultLibrary ) {
+			var releaseruntime = ! config.isDebugBuild(cfg);
+			var staticruntime = true;
+			if( cfg.staticruntime == "Off" ) {
+				staticruntime = false;
+			}
+			if( cfg.runtime == "Debug" ) {
+				releaseruntime = false;
+			} else if( cfg.runtime == "Release" ) {
+				releaseruntime = true;
+			}
+
+			if( (cfg.staticruntime && cfg.staticruntime != "Default") || (cfg.runtime && cfg.runtime != "Default") ) {
+				if( staticruntime == true && releaseruntime == true ) {
+					table.insert(flags, "-mscrtlib=libcmt");
+				} else if( staticruntime == true && releaseruntime == false ) {
+					table.insert(flags, "-mscrtlib=libcmtd");
+				} else if( staticruntime == false && releaseruntime == true ) {
+					table.insert(flags, "-mscrtlib=msvcrt");
+				} else if( staticruntime == false && releaseruntime == false ) {
+					table.insert(flags, "-mscrtlib=msvcrtd");
+				}
+			}
+		}
+
+		if( cfg.flags.Documentation ) {
+			if( cfg.docname ) {
+				table.insert(flags, "-Df" .. p.quoted(cfg.docname));
+			}
+			if( cfg.docdir ) {
+				table.insert(flags, "-Dd" .. p.quoted(cfg.docdir));
+			}
+		}
+		if( cfg.flags.GenerateHeader ) {
+			if( cfg.headername ) {
+				table.insert(flags, "-Hf" .. p.quoted(cfg.headername));
+			}
+			if( cfg.headerdir ) {
+				table.insert(flags, "-Hd" .. p.quoted(cfg.headerdir));
+			}
+		}
+
+		return flags;
+	}
+
+
+//
+// Decorate versions for the DMD command line.
+//
+
+	function dmd.getversions(versions, level) {
+		var result = {};
+		for( _, version in ipairs(versions) ) {
+			table.insert(result, '-version=' .. version);
+		}
+		if( level ) {
+			table.insert(result, '-version=' .. level);
+		}
+		return result;
+	}
+
+
+//
+// Decorate debug constants for the DMD command line.
+//
+
+	function dmd.getdebug(constants, level) {
+		var result = {};
+		for( _, constant in ipairs(constants) ) {
+			table.insert(result, '-debug=' .. constant);
+		}
+		if( level ) {
+			table.insert(result, '-debug=' .. level);
+		}
+		return result;
+	}
+
+
+//
+// Decorate import file search paths for the DMD command line.
+//
+
+	function dmd.getimportdirs(cfg, dirs) {
+		var result = {};
+		for( _, dir in ipairs(dirs) ) {
+			dir = project.getrelative(cfg.project, dir);
+			table.insert(result, '-I' .. p.quoted(dir));
+		}
+		return result;
+	}
+
+
+//
+// Decorate string import file search paths for the DMD command line.
+//
+
+	function dmd.getstringimportdirs(cfg, dirs) {
+		var result = {};
+		for( _, dir in ipairs(dirs) ) {
+			dir = project.getrelative(cfg.project, dir);
+			table.insert(result, '-J' .. p.quoted(dir));
+		}
+		return result;
+	}
+
+
+//
+// Returns the target name specific to compiler
+//
+
+	function dmd.gettarget(name) {
+		return "-of" .. name;
+	}
+
+
+//
+// Returns makefile-specific configuration rules.
+//
+
+	dmd.makesettings = {
+	};
+
+	function dmd.getmakesettings(cfg) {
+		var settings = config.mapFlags(cfg, dmd.makesettings);
+		return table.concat(settings);
+	}
+
+
+//
+// Retrieves the executable command name for a tool, based on the
+// provided configuration and the operating environment.
+//
+// @param cfg
+//    The configuration to query.
+// @param tool
+//    The tool to fetch, one of "dc" for the D compiler, or "ar" for the static linker.
+// @return
+//    The executable command name for a tool, or nil if the system's
+//    default value should be used.
+//
+
+	dmd.tools = {
+		// dmd will probably never support any foreign architectures...?
+	};
+
+	function dmd.gettoolname(cfg, tool) {
+		var names = dmd.tools[cfg.architecture] || dmd.tools[cfg.system] || {};
+		var name = names[tool];
+		return name || dmd[tool];
+	}

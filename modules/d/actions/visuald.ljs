@@ -1,0 +1,359 @@
+//
+// d/actions/visuald.ljs
+// Generate a VisualD .visualdproj project.
+// Copyright (c) 2012-2015 Manu Evans and the Premake project
+//
+
+	var p = premake;
+	var m = p.modules.d;
+
+	m.visuald = {};
+
+	require ("vstudio");
+
+	var vstudio = p.vstudio;
+	var workspace = p.workspace;
+	var project = p.project;
+	var config = p.config;
+	var tree = p.tree;
+
+//
+// Patch the vstudio actions with D support...
+//
+
+	for( k,v in pairs({ "vs2005", "vs2008", "vs2010", "vs2012", "vs2013", "vs2015", "vs2017" }) ) {
+		var vs = p.action.get(v);
+		if( vs != null ) {
+			table.insert( vs.valid_languages, p.D );
+			vs.valid_tools.dc = { "dmd", "gdc", "ldc" };
+
+			p.override(vs, "onProject", function(oldfn, prj) {
+				oldfn(prj);
+				if( project.isd(prj) ) {
+					p.generate(prj, ".visualdproj", m.visuald.generate);
+				}
+			});
+		}
+	}
+
+
+//
+// Patch a bunch of other functions
+//
+
+	p.override(project, "isnative", function(oldfn, prj) {
+		return project.isd(prj) || oldfn(prj);
+	});
+
+	p.override(vstudio, "projectfile", function(oldfn, prj) {
+		if( project.isd(prj) ) {
+			return p.filename(prj, ".visualdproj");
+		}
+		return oldfn(prj);
+	});
+
+	p.override(vstudio, "tool", function(oldfn, prj) {
+		if( project.isd(prj) ) {
+			return "002A2DE9-8BB6-484D-9802-7E4AD4084715";
+		}
+		return oldfn(prj);
+	});
+
+
+//
+// Generate a Visual D project.
+//
+
+	m.elements.project = function(prj) {
+		return {
+			m.visuald.header,
+			m.visuald.globals,
+			m.visuald.projectConfigurations,
+			m.visuald.files,
+		};
+
+	};
+
+	function m.visuald.generate(prj) {
+		p.eol("\r\n");
+		p.indent(" ");
+
+		p.callArray(m.elements.project, prj);
+
+		_p('</DProject>');
+	}
+
+
+	function m.visuald.header(prj) {
+		// for some reason Visual D projects don't seem to have an xml header
+		//_p('<?xml version="1.0" encoding="utf-8"?>')
+		_p('<DProject>');
+	}
+
+	function m.visuald.globals(prj) {
+		_p(1,'<ProjectGuid>{%s}</ProjectGuid>', prj.uuid);
+	}
+
+
+//
+// Write out the list of project configurations, which pairs build
+// configurations with architectures.
+//
+
+	function m.visuald.projectConfigurations(prj) {
+		// build a list of all architectures used in this project
+
+		for( cfg in project.eachconfig(prj) ) {
+			var prjPlatform = p.esc(vstudio.projectPlatform(cfg));
+			var slnPlatform = vstudio.solutionPlatform(cfg);
+			var is64bit = slnPlatform == "x64"; // TODO: this seems like a hack
+
+			_p(1,'<Config name="%s" platform="%s">', prjPlatform, slnPlatform);
+
+			_p(2,'<obj>0</obj>');
+			_p(2,'<link>0</link>');
+
+			var isWindows = false;
+			var isDebug = string.find(cfg.buildcfg, 'Debug') != null;
+			var isOptimised = config.isOptimizedBuild(cfg);
+
+			if( cfg.kind == p.CONSOLEAPP ) {
+				_p(2,'<lib>0</lib>');
+				_p(2,'<subsystem>1</subsystem>');
+			} else if( cfg.kind == p.STATICLIB ) {
+				_p(2,'<lib>1</lib>');
+				_p(2,'<subsystem>0</subsystem>');
+			} else if( cfg.kind == p.SHAREDLIB ) {
+				_p(2,'<lib>2</lib>');
+				_p(2,'<subsystem>0</subsystem>'); // SHOULD THIS BE '2' (windows)??
+			} else {
+				_p(2,'<lib>0</lib>');
+				_p(2,'<subsystem>2</subsystem>');
+				isWindows = true;
+			}
+
+			_p(2,'<multiobj>0</multiobj>');
+			_p(2,'<singleFileCompilation>0</singleFileCompilation>');
+			_p(2,'<oneobj>0</oneobj>');
+			_p(2,'<trace>%s</trace>', (cfg.flags.Profile ? '1' : '0'));
+			_p(2,'<quiet>%s</quiet>', (cfg.flags.Quiet ? '1' : '0'));
+			_p(2,'<verbose>%s</verbose>', (cfg.flags.Verbose ? '1' : '0'));
+			_p(2,'<vtls>0</vtls>');
+			_p(2,'<symdebug>%s</symdebug>', (cfg.symbols == p.ON || cfg.symbols == "FastLink" || cfg.symbols == "Full" ? (cfg.flags.SymbolsLikeC ? '2' : '1') : '0'));
+			_p(2,'<optimize>%s</optimize>', (isOptimised ? '1' : '0'));
+			_p(2,'<cpu>0</cpu>');
+			_p(2,'<isX86_64>%s</isX86_64>', (is64bit ? '1' : '0'));
+			_p(2,'<isLinux>0</isLinux>');
+			_p(2,'<isOSX>0</isOSX>');
+			_p(2,'<isWindows>%s</isWindows>', (isWindows ? '1' : '0'));
+			_p(2,'<isFreeBSD>0</isFreeBSD>');
+			_p(2,'<isSolaris>0</isSolaris>');
+			_p(2,'<scheduler>0</scheduler>');
+			_p(2,'<useDeprecated>%s</useDeprecated>', (cfg.deprecatedfeatures == "Allow" ? '1' : '0'));
+			_p(2,'<errDeprecated>0</errDeprecated>');
+			_p(2,'<useAssert>0</useAssert>');
+			_p(2,'<useInvariants>0</useInvariants>');
+			_p(2,'<useIn>0</useIn>');
+			_p(2,'<useOut>0</useOut>');
+			_p(2,'<useArrayBounds>0</useArrayBounds>');
+			_p(2,'<noboundscheck>%s</noboundscheck>', (cfg.boundscheck == "Off" ? '1' : '0'));
+			_p(2,'<useSwitchError>0</useSwitchError>');
+			_p(2,'<useUnitTests>%s</useUnitTests>', (cfg.flags.UnitTest ? '1' : '0'));
+			_p(2,'<useInline>%s</useInline>', (cfg.flags.Inline || isOptimised ? '1' : '0'));
+			_p(2,'<release>%s</release>', (cfg.flags.Release || ! isDebug ? '1' : '0'));
+			_p(2,'<preservePaths>0</preservePaths>');
+
+			_p(2,'<warnings>%s</warnings>', (cfg.flags.FatalCompileWarnings ? '1' : '0'));
+			_p(2,'<infowarnings>%s</infowarnings>', (cfg.warnings && cfg.warnings != "Off" ? '1' : '0'));
+
+			_p(2,'<checkProperty>0</checkProperty>');
+			_p(2,'<genStackFrame>0</genStackFrame>');
+			_p(2,'<pic>%s</pic>', (cfg.pic == "On" ? '1' : '0'));
+			_p(2,'<cov>%s</cov>', (cfg.flags.CodeCoverage ? '1' : '0'));
+			_p(2,'<nofloat>%s</nofloat>', (cfg.floatingpoint && cfg.floatingpoint == "None" ? '1' : '0'));
+			_p(2,'<Dversion>2</Dversion>');
+			_p(2,'<ignoreUnsupportedPragmas>0</ignoreUnsupportedPragmas>');
+
+			var compiler = { dmd="0", gdc="1", ldc="2" };
+			m.visuald.element(2, "compiler", compiler[_OPTIONS.dc || cfg.toolset || "dmd"]);
+
+			m.visuald.element(2, "otherDMD", '0');
+			m.visuald.element(2, "program", '$(DMDInstallDir)windows\\bin\\dmd.exe');
+
+			var impdirs;
+			if( #cfg.importdirs > 0 ) {
+				impdirs = vstudio.path(cfg, cfg.importdirs);
+			}
+			m.visuald.element(2, "imppath", impdirs);
+
+			m.visuald.element(2, "fileImppath");
+			m.visuald.element(2, "outdir", path.translate(project.getrelative(cfg.project, cfg.buildtarget.directory)));
+			m.visuald.element(2, "objdir", path.translate(project.getrelative(cfg.project, cfg.objdir)));
+			m.visuald.element(2, "objname");
+			m.visuald.element(2, "libname");
+
+			m.visuald.element(2, "doDocComments", (cfg.flags.Documentation ? '1' : '0'));
+			m.visuald.element(2, "docdir", cfg.docdir);
+			m.visuald.element(2, "docname", cfg.docname);
+			m.visuald.element(2, "modules_ddoc");
+			m.visuald.element(2, "ddocfiles");
+
+			m.visuald.element(2, "doHdrGeneration", (cfg.flags.GenerateHeader ? '1' : '0'));
+			m.visuald.element(2, "hdrdir", cfg.headerdir);
+			m.visuald.element(2, "hdrname", cfg.headername);
+
+			m.visuald.element(2, "doXGeneration", (cfg.flags.GenerateJSON ? '1' : '0'));
+			m.visuald.element(2, "xfilename", '$(IntDir)\\$(TargetName).json');
+
+			m.visuald.element(2, "debuglevel", (cfg.debuglevel ? tostring(cfg.debuglevel) : '0'));
+			m.visuald.element(2, "debugids", cfg.debugconstants);
+			m.visuald.element(2, "versionlevel", (cfg.versionlevel ? tostring(cfg.versionlevel) : '0'));
+			m.visuald.element(2, "versionids", cfg.versionconstants);
+
+			_p(2,'<dump_source>0</dump_source>');
+			_p(2,'<mapverbosity>0</mapverbosity>');
+			_p(2,'<createImplib>%s</createImplib>', (cfg.kind != p.SHAREDLIB || cfg.flags.NoImportLib ? '0' : '1'));
+			_p(2,'<defaultlibname />');
+			_p(2,'<debuglibname />');
+			_p(2,'<moduleDepsFile />');
+
+			_p(2,'<run>0</run>');
+			_p(2,'<runargs />');
+
+//			_p(2,'<runCv2pdb>%s</runCv2pdb>', (cfg.symbols == p.ON ? '1' : '0'))
+			_p(2,'<runCv2pdb>1</runCv2pdb>'); // we will just leave this always enabled, since it's ignored if no debuginfo is written
+			_p(2,'<pathCv2pdb>$(VisualDInstallDir)cv2pdb\\cv2pdb.exe</pathCv2pdb>');
+			_p(2,'<cv2pdbPre2043>0</cv2pdbPre2043>');
+			_p(2,'<cv2pdbNoDemangle>0</cv2pdbNoDemangle>');
+			_p(2,'<cv2pdbEnumType>0</cv2pdbEnumType>');
+			_p(2,'<cv2pdbOptions />');
+
+			_p(2,'<objfiles />');
+			_p(2,'<linkswitches />');
+
+			var links;
+			var explicit = vstudio.needsExplicitLink(cfg);
+			// check to see if this project uses an external toolset. If so, let the
+			// toolset define the format of the links
+			var toolset = config.toolset(cfg);
+			if( toolset ) {
+				links = toolset.getlinks(cfg, ! explicit);
+			} else {
+				var scope = (explicit ? "all" : "system");
+				links = config.getlinks(cfg, scope, "fullpath");
+			}
+			m.visuald.element(2, "libfiles", table.concat(links, " "));
+
+			m.visuald.element(2, "libpaths", cfg.libdirs);
+			_p(2,'<deffile />');
+			_p(2,'<resfile />');
+
+			var target = config.gettargetinfo(cfg);
+			_p(2,'<exefile>$(OutDir)\\%s</exefile>', target.name);
+
+			_p(2,'<useStdLibPath>1</useStdLibPath>');
+
+			var runtime = 0;
+			if( ! cfg.flags.OmitDefaultLibrary ) {
+				if( config.isDebugBuild(cfg) ) {
+					runtime = (cfg.flags.StaticRuntime ? "2" : "4");
+				} else {
+					runtime = (cfg.flags.StaticRuntime ? "1" : "3");
+				}
+			}
+			m.visuald.element(2, "cRuntime", runtime);
+
+			var additionalOptions;
+			if( #cfg.buildoptions > 0 ) {
+				additionalOptions = table.concat(cfg.buildoptions, " ");
+			}
+			if( #cfg.linkoptions > 0 ) {
+				var linkOpts = table.implode(cfg.linkoptions, "-L", "", " ");
+				if( additionalOptions ) {
+					additionalOptions = additionalOptions .. " " .. linkOpts;
+				} else {
+					additionalOptions = linkOpts;
+				}
+			}
+			m.visuald.element(2, "additionalOptions", additionalOptions);
+
+			if( #cfg.prebuildcommands > 0 ) {
+				_p(2,'<preBuildCommand>%s</preBuildCommand>',p.esc(table.implode(cfg.prebuildcommands, "", "", "\r\n")));
+			} else {
+				_p(2,'<preBuildCommand />');
+			}
+
+			if( #cfg.postbuildcommands > 0 ) {
+				_p(2,'<postBuildCommand>%s</postBuildCommand>',p.esc(table.implode(cfg.postbuildcommands, "", "", "\r\n")));
+			} else {
+				_p(2,'<postBuildCommand />');
+			}
+
+			_p(2,'<filesToClean>*.obj;*.cmd;*.build;*.json;*.dep;*.o</filesToClean>');
+
+			_p(1,'</Config>');
+		}
+	}
+
+
+//
+// Write out the source file tree.
+//
+
+	function m.visuald.files(prj) {
+		_p(1,'<Folder name="%s">', prj.name);
+
+		var tr = project.getsourcetree(prj);
+
+		tree.traverse(tr, {
+
+			// folders, virtual or otherwise, are handled at the internal nodes
+			onbranchenter = function(node, depth) {
+				_p(depth, '<Folder name="%s">', node.name);
+			},
+
+			onbranchexit = function(node, depth) {
+				_p(depth, '</Folder>');
+			},
+
+			// source files are handled at the leaves
+			onleaf = function(node, depth) {
+				_p(depth, '<File path="%s" />', path.translate(node.relpath));
+
+//				_p(depth, '<File path="%s">', path.translate(node.relpath))
+//				m.visuald.fileConfiguration(prj, node, depth + 1)
+//				_p(depth, '</File>')
+			}
+
+		}, false, 2);
+
+		_p(1,'</Folder>');
+	}
+
+	function m.visuald.fileConfiguration(prj, node, depth) {
+
+		// maybe we'll need this in the future...
+
+	}
+
+
+//
+// Output an individual project XML element.
+//
+
+	function m.visuald.element(depth, name, value, ...) {
+		var isTable = type(value) == "table";
+		if( ! value || (isTable && #value == 0) ) {
+			_p(depth, '<%s />', name);
+		} else {
+			if( isTable ) {
+				value = p.esc(table.implode(value, "", "", ";"));
+				_p(depth, '<%s>%s</%s>', name, value, name);
+			} else {
+				if( select('#',...) == 0 ) {
+					value = p.esc(value);
+				}
+				_x(depth, string.format('<%s>%s</%s>', name, value, name), ...);
+			}
+		}
+	}

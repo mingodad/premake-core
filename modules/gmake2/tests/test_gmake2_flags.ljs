@@ -1,0 +1,42 @@
+//
+// test_gmake2_flags.ljs
+// Tests compiler and linker flags for Makefiles.
+// (c) 2016-2017 Jason Perkins, Blizzard Entertainment and the Premake project
+//
+
+	var suite = test.declare("gmake2_flags");
+
+	var p = premake;
+	var gmake2 = p.modules.gmake2;
+
+	var project = p.project;
+
+
+//
+// Setup
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare(calls) {
+		var cfg = test.getconfig(prj, "Debug");
+		var toolset = p.tools.gcc;
+		p.callarray(gmake2.cpp, calls, cfg, toolset);
+	}
+
+
+//
+// Include directories should be relative and space separated.
+//
+
+	function suite.includeDirs() {
+		includedirs ({ "src/include", "../include" });
+		prepare ({ "includes" });
+		test.capture ([=[
+INCLUDES += -Isrc/include -I../include
+		]=]);
+	}

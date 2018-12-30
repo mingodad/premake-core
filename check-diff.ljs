@@ -1,0 +1,125 @@
+var base_folder = "../premake-core/";
+
+var cmd = "find " .. base_folder .. " -name '*.lua'";
+//var file_list = io.popen(cmd)->read("*a");
+//print(file_list);
+
+var function osExec(cmd)
+{
+	print(cmd);
+	io.stdout->flush();
+	os.execute(cmd);
+}
+
+var lua_globals_list = {};
+var ljs_globals_list = {};
+
+var function checkGlobalsByCmd(lcmd)
+{
+	var g_list = [];
+	var fd = io.popen(lcmd);
+	var line_count = 0;
+	for(line in fd->lines())
+	{
+		++line_count;
+		//0051    GGET    23  30      ; "coroutine"
+		//var gvar = line->match("%d+ +GGET +%d+ +%d+ +; +\"([^\"]+)\"");
+		var gvar = line->match("%d+	%[%d+%]	GETTABUP [^;]+; _ENV \"([^\"]+)\"");
+		if(gvar) {
+			//print(gvar);
+			table.insert(g_list, gvar);
+		}
+	}
+	fd->close();
+	//print(line_count);
+	return g_list;
+}
+
+var function checkGlobals(lua_fn, ljs_fn)
+{
+	print(ljs_fn);
+	var lcmd = "ljsc -p -l " .. ljs_fn;
+	var g_ljs_list = checkGlobalsByCmd(lcmd);
+
+	print(lua_fn);
+	lcmd = "lua-5.3-env luac -p -l " .. lua_fn;
+	var g_lua_list = checkGlobalsByCmd(lcmd);
+	
+	if(#g_ljs_list != #g_lua_list) print("++do not match", #g_ljs_list, #g_lua_list);
+	for(idx, k in ipairs(g_ljs_list))
+	{
+		if(g_lua_list[idx] != k)
+		{
+			print("**do not match", k, g_lua_list[idx]);
+			print(ljs_fn .. ":1:1");
+			//break;
+		}
+	}
+}
+
+//find . -type f -name '*' -exec grep -H -n '\.lua' '{}' \;
+//find . -type l
+
+/*
+./snabb snsh -t lib.ctable
+lib.ctable:Illegal instruction (core dumped)
+lib.ipsec.aes_128_gcm:Illegal instruction (core dumped)
+lib.ipsec.esp:Illegal instruction (core dumped)
+program.lwaftr.tests.end-to-end.selftest.sh:./core-end-to-end.sh: line 24: 32444 Illegal instruction     (core dumped) ${SNABB_LWAFTR} check $conf $v4_in $v6_in $endoutv4 $endoutv6 $counters_path
+program.lwaftr.tests.end-to-end.selftest.sh:./core-end-to-end.sh: line 24: 32458 Illegal instruction     (core dumped) ${SNABB_LWAFTR} check $conf $v4_in $v6_in $endoutv4 $endoutv6 $counters_path
+program.lwaftr.tests.soaktest.selftest.sh:./core-soaktest.sh: line 16: 32511 Illegal instruction     (core dumped) $SNABB_LWAFTR soaktest -D $DURATION "$conf" "$in_v4" "$in_v6"
+program.lwaftr.tests.soaktest.selftest.sh:./core-soaktest.sh: line 16: 32524 Illegal instruction     (core dumped) $SNABB_LWAFTR soaktest -D $DURATION "$conf" "$in_v4" "$in_v6"
+*/
+
+var fname_re = base_folder->gsub("[.-]", "%%%1") .. "(.+)$";
+//print(fname_re);
+var fd = io.popen(cmd);
+for(line in fd->lines())
+{
+	//print(line);
+	var fname = line->match(fname_re);
+	//print(line, fname);continue;
+	var fname_ljs = fname->replace(".lua", ".ljs");
+	
+	//cmd = "rm " .. fname;
+	//osExec(cmd); continue;
+	
+	cmd = "lua2ljs " .. line .. " > " .. fname_ljs;
+	//osExec(cmd); continue;
+	
+	//checkGlobals(line, fname_ljs); continue;
+	
+	
+	//cmd = "bin/linux/x64/ljsjit-2.0.5 -b -l " .. fname_ljs .. " > /dev/null";
+	//cmd = "ljsjit -b -l " .. fname_ljs .. " > /dev/null";
+	//cmd = "bin/linux/x64/ljsc54 -p -l " .. fname_ljs .. " > /dev/null";
+	//cmd = "bin/linux/x64/ljsc53 -p -l " .. fname_ljs .. " > /dev/null";
+	//cmd = "/home/mingo/dev/lua/lua-5.2.4-ljs/src/ljsc -p -l " .. fname_ljs .. " > /dev/null";
+	cmd = "ljsc -p -l " .. fname_ljs .. " > /dev/null";
+	osExec(cmd);	continue;
+
+	//cmd = "grep -H -n -b 'default' " .. fname_ljs;
+	//cmd = "grep -H -n -b '\"null\"' " .. fname_ljs;
+	cmd = "grep -H -n -b \"'nil'\" " .. fname_ljs;
+	//cmd = "grep -H -n -b '\"nil\"' " .. fname_ljs;
+	//cmd = "grep -H -n -b '/openresty/' " .. fname_ljs;
+	//cmd = "grep -H -n -b 'local' " .. fname_ljs;
+	//cmd = "grep -H -n -b \"'lua'\" " .. fname_ljs;
+	//cmd = "grep -H -n -b '\"lua\"' " .. fname_ljs;
+	//cmd = "grep -H -n -b \"'luajit'\" " .. fname_ljs;
+	//cmd = "grep -H -n -b '\"luajit\"' " .. fname_ljs;
+	//cmd = "grep -H -n -b '\\?lua' " .. fname_ljs;
+	//cmd = "grep -H -n -b '\\.lua' " .. fname_ljs;
+	//cmd = "grep -H -n -b '\\[=\\[' " .. fname_ljs;
+	osExec(cmd); continue;
+
+	var fname_ljs_base = fname_ljs .. ".base";
+	cmd = "lua2ljs " .. line .. " > " .. fname_ljs_base;
+	osExec(cmd);
+	cmd =   "echo " .. fname_ljs .. ";diff " .. fname_ljs_base .. " " .. fname_ljs;
+	osExec(cmd);
+	cmd =   "rm " .. fname_ljs_base;
+	osExec(cmd);
+}
+
+fd->close();

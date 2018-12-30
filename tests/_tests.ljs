@@ -1,0 +1,65 @@
+return {
+	// Base API tests
+	"test_string.ljs",
+	"base/test_aliasing.ljs",
+	"base/test_binmodules.ljs",
+	"base/test_configset.ljs",
+	"base/test_context.ljs",
+	"base/test_criteria.ljs",
+	"base/test_detoken.ljs",
+	"base/test_include.ljs",
+	"base/test_module_loader.ljs",
+	"base/test_option.ljs",
+	"base/test_os.ljs",
+	"base/test_override.ljs",
+	"base/test_path.ljs",
+	"base/test_premake_command.ljs",
+	"base/test_table.ljs",
+	"base/test_tree.ljs",
+	"base/test_uuid.ljs",
+	"base/test_versions.ljs",
+	"base/test_http.ljs",
+	"base/test_json.ljs",
+
+	// Workspace object tests
+	"workspace/test_eachconfig.ljs",
+	"workspace/test_location.ljs",
+	"workspace/test_objdirs.ljs",
+
+	// Project object tests
+	"project/test_config_maps.ljs",
+	"project/test_eachconfig.ljs",
+	"project/test_getconfig.ljs",
+	"project/test_location.ljs",
+	"project/test_sources.ljs",
+	"project/test_vpaths.ljs",
+
+	// Configuration object tests
+	"config/test_linkinfo.ljs",
+	"config/test_links.ljs",
+	"config/test_targetinfo.ljs",
+
+	// Baking tests
+	"oven/test_filtering.ljs",
+	"oven/test_objdirs.ljs",
+
+	// API tests
+	"api/test_boolean_kind.ljs",
+	"api/test_containers.ljs",
+	"api/test_directory_kind.ljs",
+	"api/test_list_kind.ljs",
+	"api/test_path_kind.ljs",
+	"api/test_register.ljs",
+	"api/test_string_kind.ljs",
+	"api/test_table_kind.ljs",
+	"api/test_deprecations.ljs",
+
+	// Control system tests
+	"test_premake.ljs",
+	"base/test_validation.ljs",
+
+	// -- Toolset tests
+	"tools/test_dotnet.ljs",
+	"tools/test_gcc.ljs",
+	"tools/test_msc.ljs",
+};

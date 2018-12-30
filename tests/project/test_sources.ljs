@@ -1,0 +1,94 @@
+//
+// tests/project/test_sources.ljs
+// Automated test suite for the source tree, including tokens and wildcards.
+// Copyright (c) 2011-2013 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("project_sources");
+	var project = p.project;
+
+
+//
+// Setup and teardown
+//
+
+	var wks, prj;
+
+	var cwd = os.getcwd();
+	var oldcwd;
+
+	function suite.setup() {
+		wks, prj = test.createWorkspace();
+
+		// We change the directory to get nice relative paths
+		oldcwd = os.getcwd();
+		os.chdir(cwd);
+
+		// Create a token to be used in search paths
+		p.api.register ({ name = "mytoken", kind = "string", scope = "config" });
+		mytoken ("test");
+	}
+
+	function suite.teardown() {
+		mytoken = null;
+		os.chdir(oldcwd);
+	}
+
+	var function run() {
+		var cfg = test.getconfig(prj, "Debug");
+
+		var files = {};
+		for( _, file in ipairs(cfg.files) ) {
+			table.insert(files, path.getrelative(cwd, file));
+		}
+
+		return files;
+	}
+
+
+//
+// Test single file
+//
+
+	function suite.SingleFile() {
+		files ({ "test_sources.ljs" });
+		test.isequal({"test_sources.ljs"}, run());
+	}
+
+//
+// Test tokens
+//
+
+	function suite.SingleFileWithToken() {
+		files ({ "%{cfg.mytoken}_sources.ljs" });
+		test.isequal({"test_sources.ljs"}, run());
+	}
+
+//
+// Test wildcards
+//
+
+	function suite.FilesWithWildcard() {
+		files ({ "test_*.ljs" });
+		test.contains("test_sources.ljs", run());
+	}
+
+	function suite.FilesWithRecursiveWildcard() {
+		files ({ "../**_sources.ljs" });
+		test.contains("test_sources.ljs", run());
+	}
+
+//
+// Test wildcards and tokens combined
+//
+
+	function suite.FilesWithWildcardAndToken() {
+		files ({ "%{cfg.mytoken}_*.ljs" });
+		test.contains("test_sources.ljs", run());
+	}
+
+	function suite.FilesWithRecursiveWildcardAndToken() {
+		files ({ "../**/%{cfg.mytoken}_sources.ljs" });
+		test.contains("test_sources.ljs", run());
+	}

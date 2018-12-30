@@ -1,0 +1,19 @@
+//---------------------------------------------------------------------------
+// Little program to convert to and from Base64
+// LuaSocket sample files
+// Author: Diego Nehab
+//---------------------------------------------------------------------------
+var ltn12 = require("ltn12");
+var mime = require("mime");
+var source = ltn12.source.file(io.stdin);
+var sink = ltn12.sink.file(io.stdout);
+var convert;
+if( arg && arg[1] == '-d' ) {
+    convert = mime.decode("base64");
+} else {
+    var base64 = mime.encode("base64");
+    var wrap = mime.wrap();
+    convert = ltn12.filter.chain(base64, wrap);
+}
+sink = ltn12.sink.chain(convert, sink);
+ltn12.pump.all(source, sink);

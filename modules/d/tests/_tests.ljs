@@ -1,0 +1,9 @@
+require ("d");
+
+return {
+	"test_visualstudio.ljs",
+	"test_gmake.ljs",
+	"test_dmd.ljs",
+	"test_gdc.ljs",
+	"test_ldc.ljs",
+};

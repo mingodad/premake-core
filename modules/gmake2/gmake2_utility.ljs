@@ -1,0 +1,386 @@
+//
+// gmake2_utility.ljs
+// Generate a C/C++ project makefile.
+// (c) 2016-2017 Jason Perkins, Blizzard Entertainment and the Premake project
+//
+
+	var p = premake;
+	var gmake2 = p.modules.gmake2;
+
+	gmake2.utility   = {};
+	var utility    = gmake2.utility;
+
+	var project    = p.project;
+	var config     = p.config;
+	var fileconfig = p.fileconfig;
+
+//-
+// Add namespace for element definition lists for premake.callarray()
+//-
+
+	utility.elements = {};
+
+
+//
+// Generate a GNU make utility project makefile
+//
+
+	utility.elements.makefile = function(prj) {
+		return {
+			gmake2.header,
+			gmake2.phonyRules,
+			gmake2.shellType,
+			utility.initialize,
+			utility.createFileTable,
+			utility.outputConfigurationSection,
+			utility.outputFilesSection,
+			utility.outputRulesSection,
+			utility.outputFileRuleSection,
+		};
+	};
+
+
+	function utility.generate(prj) {
+		p.eol("\n");
+		p.callArray(utility.elements.makefile, prj);
+
+		// allow the garbage collector to clean things up.
+		for( cfg in project.eachconfig(prj) ) {
+			cfg._gmake = null;
+		}
+		prj._gmake = null;
+
+	}
+
+
+	function utility.initialize(prj) {
+		prj._gmake = prj._gmake || {};
+		prj._gmake.rules = prj.rules;
+		prj._gmake.filesets = { };
+	}
+
+
+	function utility.createFileTable(prj) {
+		for( cfg in project.eachconfig(prj) ) {
+			cfg._gmake = cfg._gmake || {};
+			cfg._gmake.filesets = {};
+			cfg._gmake.fileRules = {};
+
+			var files = table.shallowcopy(prj._.files);
+			table.foreachi(files, function(node) {
+				utility.addFile(cfg, node, prj);
+			});
+
+			for( _, f in pairs(cfg._gmake.filesets) ) {
+				table.sort(f);
+			}
+
+			cfg._gmake.kinds = table.keys(cfg._gmake.filesets);
+			table.sort(cfg._gmake.kinds);
+
+			prj._gmake.kinds = table.join(prj._gmake.kinds || {}, cfg._gmake.kinds);
+		}
+
+		prj._gmake.kinds = table.unique(prj._gmake.kinds);
+		table.sort(prj._gmake.kinds);
+	}
+
+
+	function utility.addFile(cfg, node, prj) {
+		var filecfg = fileconfig.getconfig(node, cfg);
+		if( ! filecfg || filecfg.flags.ExcludeFromBuild ) {
+			return;
+		}
+
+		// skip generated files, since we try to figure it out manually below.
+		if( node.generated ) {
+			return;
+		}
+
+		// process custom build commands.
+		if( fileconfig.hasCustomBuildRule(filecfg) ) {
+			var env = table.shallowcopy(filecfg.environ);
+			env.PathVars = {
+				["file.basename"] = { absolute = false, token = node.basename },
+				["file.abspath"]  = { absolute = true,  token = node.abspath },
+				["file.relpath"]  = { absolute = false, token = node.relpath },
+				["file.name"]     = { absolute = false, token = node.name },
+				["file.path"]     = { absolute = true,  token = node.path },
+			};
+
+			var shadowContext = p.context.extent(filecfg, env);
+
+			var buildoutputs = p.project.getrelative(cfg.project, shadowContext.buildoutputs);
+			if( buildoutputs && #buildoutputs > 0 ) {
+				var file = {
+					buildoutputs  = buildoutputs,
+					source        = node.relpath,
+					buildmessage  = shadowContext.buildmessage,
+					buildcommands = shadowContext.buildcommands,
+					buildinputs   = p.project.getrelative(cfg.project, shadowContext.buildinputs)
+				};
+				table.insert(cfg._gmake.fileRules, file);
+
+				for( _, output in ipairs(buildoutputs) ) {
+					utility.addGeneratedFile(cfg, node, output);
+				}
+			}
+		} else {
+			utility.addRuleFile(cfg, node);
+		}
+	}
+
+
+	function utility.addGeneratedFile(cfg, source, filename) {
+		// mark that we have generated files.
+		cfg.project.hasGeneratedFiles = true;
+
+		// add generated file to the project.
+		var files = cfg.project._.files;
+		var node = files[filename];
+		if( ! node ) {
+			node = fileconfig.new(filename, cfg.project);
+			files[filename] = node;
+			table.insert(files, node);
+		}
+
+		// always overwrite the dependency information.
+		node.dependsOn = source;
+		node.generated = true;
+
+		// add to config if not already added.
+		if( ! fileconfig.getconfig(node, cfg) ) {
+			fileconfig.addconfig(node, cfg);
+		}
+
+		// add file to the fileset.
+		var filesets = cfg.project._gmake.filesets;
+		var kind = "CUSTOM";
+
+		var fileset = cfg._gmake.filesets[kind] || {};
+		table.insert(fileset, filename);
+		cfg._gmake.filesets[kind] = fileset;
+
+		// recursively setup rules.
+		utility.addRuleFile(cfg, node);
+	}
+
+
+	function utility.addRuleFile(cfg, node) {
+		var rules = cfg.project._gmake.rules;
+		var rule = rules[path.getextension(node.abspath)->lower()];
+		if( rule ) {
+
+			var filecfg = fileconfig.getconfig(node, cfg);
+			var environ = table.shallowcopy(filecfg.environ);
+
+			if( rule.propertydefinition ) {
+				gmake2.prepareEnvironment(rule, environ, cfg);
+				gmake2.prepareEnvironment(rule, environ, filecfg);
+			}
+
+			var shadowContext = p.context.extent(rule, environ);
+
+			var buildoutputs  = shadowContext.buildoutputs;
+			var buildmessage  = shadowContext.buildmessage;
+			var buildcommands = shadowContext.buildcommands;
+			var buildinputs   = shadowContext.buildinputs;
+
+			buildoutputs = p.project.getrelative(cfg.project, buildoutputs);
+			if( buildoutputs && #buildoutputs > 0 ) {
+				var file = {
+					buildoutputs  = buildoutputs,
+					source        = node.relpath,
+					buildmessage  = buildmessage,
+					buildcommands = buildcommands,
+					buildinputs   = buildinputs
+				};
+				table.insert(cfg._gmake.fileRules, file);
+
+				for( _, output in ipairs(buildoutputs) ) {
+					utility.addGeneratedFile(cfg, node, output);
+				}
+			}
+		}
+	}
+
+
+//
+// Write out the settings for a particular configuration.
+//
+
+	utility.elements.configuration = function(cfg) {
+		return {
+			utility.bindirs,
+			utility.exepaths,
+			gmake2.settings,
+			gmake2.preBuildCmds,
+			gmake2.preLinkCmds,
+			gmake2.postBuildCmds,
+		};
+	};
+
+
+	function utility.outputConfigurationSection(prj) {
+		_p('# Configurations');
+		_p('# #############################################');
+		_p('');
+		gmake2.outputSection(prj, utility.elements.configuration);
+	}
+
+
+	function utility.bindirs(cfg, toolset) {
+		var dirs = project.getrelative(cfg.project, cfg.bindirs);
+		if( #dirs > 0 ) {
+			p.outln('EXECUTABLE_PATHS = "' .. table.concat(dirs, ":") .. '"');
+		}
+	}
+
+
+	function utility.exepaths(cfg, toolset) {
+		var dirs = project.getrelative(cfg.project, cfg.bindirs);
+		if( #dirs > 0 ) {
+			p.outln('EXE_PATHS = PATH=$(EXECUTABLE_PATHS):$$PATH;');
+		}
+	}
+
+
+//
+// Write out the file sets.
+//
+
+	utility.elements.filesets = function(cfg) {
+		var result = {};
+		for( _, kind in ipairs(cfg._gmake.kinds) ) {
+			for( _, f in ipairs(cfg._gmake.filesets[kind]) ) {
+				table.insert(result, function(cfg, toolset) {
+					utility.outputFileset(cfg, kind, f);
+				});
+			}
+		}
+		return result;
+	};
+
+
+	function utility.outputFilesSection(prj) {
+		_p('# File sets');
+		_p('# #############################################');
+		_p('');
+
+		for( _, kind in ipairs(prj._gmake.kinds) ) {
+			_x('%s :=', kind);
+		}
+		_x('');
+
+		gmake2.outputSection(prj, utility.elements.filesets);
+	}
+
+
+	function utility.outputFileset(cfg, kind, file) {
+		_x('%s += %s', kind, file);
+	}
+
+
+//
+// Write out the targets.
+//
+
+	utility.elements.rules = function(cfg) {
+		return {
+			utility.allRules,
+			utility.targetRules,
+			gmake2.targetDirRules,
+			utility.cleanRules,
+		};
+	};
+
+
+	function utility.outputRulesSection(prj) {
+		_p('# Rules');
+		_p('# #############################################');
+		_p('');
+		gmake2.outputSection(prj, utility.elements.rules);
+	}
+
+
+	function utility.allRules(cfg, toolset) {
+		var allTargets = 'all: $(TARGETDIR) $(TARGET)';
+		for( _, kind in ipairs(cfg._gmake.kinds) ) {
+			allTargets = allTargets .. ' $(' .. kind .. ')';
+		}
+		_p(allTargets);
+		_p('\t@:');
+		_p('');
+	}
+
+
+	function utility.targetRules(cfg, toolset) {
+		var targets = '';
+
+		for( _, kind in ipairs(cfg._gmake.kinds) ) {
+			targets = targets .. '$(' .. kind .. ') ';
+		}
+
+		_p('$(TARGET): %s', targets);
+		_p('\t$(PREBUILDCMDS)');
+		_p('\t$(PRELINKCMDS)');
+		_p('\t$(POSTBUILDCMDS)');
+		_p('');
+	}
+
+
+	function utility.cleanRules(cfg, toolset) {
+		_p('clean:');
+		_p('\t@echo Cleaning %s', cfg.project.name);
+		_p('');
+	}
+
+
+//
+// Output the file compile targets.
+//
+
+	utility.elements.fileRules = function(cfg) {
+		var funcs = {};
+		for( _, fileRule in ipairs(cfg._gmake.fileRules) ) {
+			table.insert(funcs, function(cfg, toolset) {
+				utility.outputFileRules(cfg, fileRule);
+			});
+		}
+		return funcs;
+	};
+
+
+	function utility.outputFileRuleSection(prj) {
+		_p('# File Rules');
+		_p('# #############################################');
+		_p('');
+		gmake2.outputSection(prj, utility.elements.fileRules);
+	}
+
+
+	function utility.outputFileRules(cfg, file) {
+		var outputs = table.concat(file.buildoutputs, ' ');
+
+		var dependencies = p.esc(file.source);
+		if( file.buildinputs && #file.buildinputs > 0 ) {
+			dependencies = dependencies .. " " .. table.concat(p.esc(file.buildinputs), " ");
+		}
+
+		_p('%s: %s', outputs, dependencies);
+
+		if( file.buildmessage ) {
+			_p('\t@echo %s', file.buildmessage);
+		}
+
+		if( file.buildcommands ) {
+			var cmds = os.translateCommandsAndPaths(file.buildcommands, cfg.project.basedir, cfg.project.location);
+			for( _, cmd in ipairs(cmds) ) {
+				if( cfg.bindirs && #cfg.bindirs > 0 ) {
+					_p('\t$(SILENT) $(EXE_PATHS) %s', cmd);
+				} else {
+					_p('\t$(SILENT) %s', cmd);
+				}
+			}
+		}
+	}

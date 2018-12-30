@@ -1,0 +1,111 @@
+//---------------------------------------------------------------------------
+// Little program that checks links in HTML files, using coroutines and
+// non-blocking I/O via the dispatcher module.
+// LuaSocket sample files
+// Author: Diego Nehab
+//---------------------------------------------------------------------------
+var url = require("socket.url");
+var dispatch = require("dispatch");
+var http = require("socket.http");
+dispatch.TIMEOUT = 10;
+
+// make sure the user knows how to invoke us
+arg = arg || {};
+if( #arg < 1 ) {
+    print("Usage:\n  luasocket check-links.ljs [-n] {<url>}");
+    exit();
+}
+
+// '-n' means we are running in non-blocking mode
+if( arg[1] == "-n" ) {
+    // if non-blocking I/O was requested, use real dispatcher interface
+    table.remove(arg, 1);
+    handler = dispatch.newhandler("coroutine");
+} else {
+    // if using blocking I/O, use fake dispatcher interface
+    handler = dispatch.newhandler("sequential");
+}
+
+var nthreads = 0;
+
+// get the status of a URL using the dispatcher
+function getstatus(link) {
+    var parsed = url.parse(link, {scheme = "file"});
+    if( parsed.scheme == "http" ) {
+        ++nthreads    ;
+        handler->start(function() {
+            var r, c, h, s = http.request({
+                method = "HEAD",
+                url = link,
+                create = handler.tcp
+            });
+            if( r && c == 200 ) { io.write('\t', link, '\n');
+            } else { io.write('\t', link, ': ', tostring(c), '\n'); }
+            --nthreads    ;
+        });
+    }
+}
+
+function readfile(path) {
+    path = url.unescape(path);
+    var file, error = io.open(path, "r");
+    if( file ) {
+        var body = file->read("*a");
+        file->close();
+        return body;
+    } else { return null, error; }
+}
+
+function load(u) {
+    var parsed = url.parse(u, { scheme = "file" });
+    var body, headers, code, error;
+    var base = u;
+    if( parsed.scheme == "http" ) {
+        body, code, headers = http.request(u);
+        if( code == 200 ) {
+            // if there was a redirect, update base to reflect it
+            base = headers.location || base;
+        }
+        if( ! body ) {
+            error = code;
+        }
+    } else if( parsed.scheme == "file" ) {
+        body, error = readfile(parsed.path);
+    } else { error = string.format("unhandled scheme '%s'", parsed.scheme); }
+    return base, body, error;
+}
+
+function getlinks(body, base) {
+    // get rid of comments
+    body = string.gsub(body, "%<%!%-%-.-%-%-%>", "");
+    var links = {};
+    // extract links
+    body = string.gsub(body, '[Hh][Rr][Ee][Ff]%s*=%s*"([^"]*)"', function(href) {
+        table.insert(links, url.absolute(base, href));
+    });
+    body = string.gsub(body, "[Hh][Rr][Ee][Ff]%s*=%s*'([^']*)'", function(href) {
+        table.insert(links, url.absolute(base, href));
+    });
+    string.gsub(body, "[Hh][Rr][Ee][Ff]%s*=%s*(.-)>", function(href) {
+        table.insert(links, url.absolute(base, href));
+    });
+    return links;
+}
+
+function checklinks(address) {
+    var base, body, error = load(address);
+    if( ! body ) { print(error); return; }
+    print("Checking ", base);
+    var links = getlinks(body, base);
+    for( _, link in ipairs(links) ) {
+        getstatus(link);
+    }
+}
+
+for( _, address in ipairs(arg) ) {
+    checklinks(url.absolute("file:", address));
+}
+
+while( nthreads > 0 ) {
+    handler->step();
+}

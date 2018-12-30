@@ -1,0 +1,239 @@
+//-
+// base/validation.ljs
+//
+// Verify the contents of the project object before handing them off to
+// the action/exporter.
+//
+// Copyright (c) 2002-2015 Jason Perkins and the Premake project
+//-
+
+	var p = premake;
+	p.validation = {};
+	var m = p.validation;
+
+	m.elements = {};
+
+
+//-
+// Validate the global container and all of its contents.
+//-
+
+	m.elements.global = function(glb) {
+		return {
+		};
+	};
+
+	function p.global.validate(this) {
+		p.callArray(m.elements.global, this);
+		p.container.validateChildren(this);
+	}
+
+
+
+//-
+// Validate a workspace and its projects.
+//-
+
+	m.elements.workspace = function(wks) {
+		return {
+			m.workspaceHasConfigs,
+			m.uniqueProjectIds,
+		};
+	};
+
+	function p.workspace.validate(this) {
+		p.callArray(m.elements.workspace, this);
+		p.container.validateChildren(this);
+	}
+
+
+
+//-
+// Validate a project and its configurations.
+//-
+
+	m.elements.project = function(prj) {
+		return {
+			m.projectHasLanguage,
+			m.actionSupportsLanguage,
+			m.actionSupportsKind,
+			m.projectRulesExist,
+			m.projectValuesInScope,
+		};
+	};
+
+	function p.project.validate(this) {
+		p.callArray(m.elements.project, this);
+		for( cfg in p.project.eachconfig(this) ) {
+			p.config.validate(cfg);
+		}
+	}
+
+
+
+//-
+// Validate a project configuration.
+//-
+
+	m.elements.config = function(cfg) {
+		return {
+			m.configHasKind,
+			m.configSupportsKind,
+			m.configValuesInScope,
+		};
+	};
+
+	function p.config.validate(this) {
+		p.callArray(m.elements.config, this);
+
+	}
+
+
+
+//-
+// Validate a rule.
+//-
+
+	m.elements.rule = function(rule) {
+		return {
+			// TODO: fill this in
+		};
+	};
+
+	function p.rule.validate(this) {
+		p.callArray(m.elements.rule, this);
+	}
+
+
+
+//-
+// Check the values stored in a configuration for values that might have
+// been set out of scope.
+//
+// @param container
+//    The container being validated; will only check fields which are
+//    scoped to this container's class hierarchy.
+// @param expectedScope
+//    The expected scope of values in this object, i.e. "project", "config".
+//    Values that appear unexpectedly get checked to be sure they match up
+//    with the values in the expected scope, and an error is raised if they
+//    are not the same.
+//-
+
+	function p.config.validateScopes(this, container, expected) {
+		for( f in p.field.each() ) {
+			// If this field scoped to the target container class? If not
+			// I can skip over it (config scope applies to everything).
+			var scope;
+			for( i = 1, #f.scopes ) {
+				if( f.scopes[i] == "config" || p.container.classIsA(container.class, f.scopes[i]) ) {
+					scope = f.scopes[i];
+					break;
+				}
+			}
+
+			var okay = (! scope || scope == "config");
+
+			// Skip over fields that are at or below my expected scope.
+			okay = okay || scope == expected;
+
+			// Skip over fields that bubble up to their parent containers anyway;
+			// these can't be out of scope for that reason
+			okay = okay || p.oven.bubbledFields[f.name];
+
+			// this one needs to checked
+			okay = okay || p.field.compare(f, this[scope][f.name], this[f.name]);
+
+			// found a problem?
+			if( ! okay ) {
+				var key = "validate." .. f.name;
+				p.warnOnce(key, "'%s' on %s '%s' differs from %s '%s'; may be set out of scope", f.name, expected, this.name, scope, this[scope].name);
+			}
+		}
+	}
+
+
+
+//-------------------------------------------------------------------------
+//
+// Handlers for individual checks
+//
+//-------------------------------------------------------------------------
+
+	function m.actionSupportsKind(prj) {
+		if( ! p.action.supports(prj.kind) ) {
+			p.warn("Unsupported kind '%s' used for project '%s'", prj.kind, prj.name);
+		}
+	}
+
+
+	function m.actionSupportsLanguage(prj) {
+		if( ! p.action.supports(prj.language) ) {
+			p.warn("Unsupported language '%s' used for project '%s'", prj.language, prj.name);
+		}
+	}
+
+
+	function m.configHasKind(cfg) {
+		if( ! cfg.kind ) {
+			p.error("Project '%s' needs a kind in configuration '%s'", cfg.project.name, cfg.name);
+		}
+	}
+
+
+	function m.configSupportsKind(cfg) {
+		if( ! p.action.supports(cfg.kind) ) {
+			p.warn("Unsupported kind '%s' used in configuration '%s'", cfg.kind, cfg.name);
+		}
+
+		// makefile configuration can only appear in C++ projects; this is the
+		// default now, so should only be a problem if overridden.
+		if( (cfg.kind == p.MAKEFILE || cfg.kind == p.NONE) && p.project.isdotnet(cfg.project) ) {
+			p.error("Project '%s' uses '%s' kind in configuration '%s'; language must not be C#", cfg.project.name, cfg.kind, cfg.name);
+		}
+	}
+
+
+	function m.configValuesInScope(cfg) {
+		p.config.validateScopes(cfg, cfg.project, "config");
+	}
+
+
+	function m.projectHasLanguage(prj) {
+		if( ! prj.language ) {
+			p.error("project '%s' does not have a language", prj.name);
+		}
+	}
+
+
+	function m.projectRulesExist(prj) {
+		for( i = 1, #prj.rules ) {
+			var rule = prj.rules[i];
+			if( ! p.global.getRule(rule) ) {
+				p.error("project '%s' uses missing rule '%s'", prj.name, rule);
+			}
+		}
+	}
+
+
+	function m.projectValuesInScope(prj) {
+		p.config.validateScopes(prj, prj, "project");
+	}
+
+
+	function m.uniqueProjectIds(wks) {
+		var uuids = {};
+		for( prj in p.workspace.eachproject(wks) ) {
+			if( uuids[prj.uuid] ) {
+				p.error("projects '%s' and '%s' have the same UUID", uuids[prj.uuid], prj.name);
+			}
+			uuids[prj.uuid] = prj.name;
+		}
+	}
+
+
+	function m.workspaceHasConfigs(wks) {
+		if( ! wks.configurations || #wks.configurations == 0 ) {
+			p.error("workspace '%s' does not contain any configurations", wks.name);
+		}
+	}

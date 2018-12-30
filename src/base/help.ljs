@@ -1,0 +1,81 @@
+//
+// help.ljs
+// User help, displayed on /help option.
+// Copyright (c) 2002-2013 Jason Perkins and the Premake project
+//
+
+
+	function premake.showhelp() {
+
+		// display the basic usage
+		printf("Premake %s, a build script generator", _PREMAKE_VERSION);
+		printf(_PREMAKE_COPYRIGHT);
+		printf("%s %s", _VERSION, _COPYRIGHT);
+		printf("");
+		printf("Usage: premake5 [options] action [arguments]");
+		printf("");
+
+		// filter all options by category.
+		var categories = {};
+		for( option in premake.option.each() ) {
+			var cat = "OPTIONS - General";
+			if( option.category ) {
+				cat = "OPTIONS - " .. option.category;
+			}
+
+			if( categories[cat] ) {
+				table.insert(categories[cat], option);
+			} else {
+				categories[cat] = {option};
+			}
+		}
+
+		// display all options
+		for( k, options in spairs(categories) ) {
+			printf(k);
+			printf("");
+
+			var length = 0;
+			for( _, option in ipairs(options) ) {
+				var trigger = option.trigger;
+				if( (option.value) ) { trigger = trigger .. "=" .. option.value; }
+				if( (#trigger > length) ) { length = #trigger; }
+			}
+
+			for( _, option in ipairs(options) ) {
+				var trigger = option.trigger;
+				var description = option.description;
+				if( (option.value) ) { trigger = trigger .. "=" .. option.value; }
+				if( (option.allowed) ) { description = description .. "; one of:"; }
+
+				printf(" --%-" .. length .. "s %s", trigger, description);
+				if( (option.allowed) ) {
+					var function compareValue(a, b) {
+						return a[1] < b[1];
+					}
+					table.sort(option.allowed, compareValue);
+
+					for( _, value in ipairs(option.allowed) ) {
+						printf("     %-" .. length-1 .. "s %s", value[1], value[2]);
+					}
+					printf("");
+				}
+			}
+			printf("");
+		}
+
+		// display all actions
+		printf("ACTIONS");
+		printf("");
+		for( action in premake.action.each() ) {
+			printf(" %-17s %s", action.trigger, action.description);
+		}
+		printf("");
+
+
+		// see more
+		printf("For additional information, see https://premake.github.io");
+
+	}
+
+

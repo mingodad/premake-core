@@ -1,0 +1,54 @@
+//
+// tests/actions/vstudio/sln2005/test_sections.ljs
+// Validate generation of Visual Studio 2005+ solution section entries.
+// Copyright (c) 2009-2013 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("vstudio_sln2005_sections");
+	var sln2005 = p.vstudio.sln2005;
+
+
+//
+// Setup
+//
+
+	var wks;
+
+	function suite.setup() {
+		_MAIN_SCRIPT = "c:\\test\\premake5.ljs";
+
+		p.escaper(p.vstudio.vs2005.esc);
+		wks = workspace("MyWorkspace");
+		wks.location = "c:\\test\\build";
+
+		configurations ({ "Debug", "Release" });
+		language ("C++");
+		kind ("ConsoleApp");
+	}
+
+//
+// Test the editorintegration switch.
+//
+	function suite.extensibilityGlobalsOn() {
+		editorintegration ("On");
+
+		project ("MyProject");
+		sln2005.extensibilityGlobals(wks);
+
+		test.capture ([=[
+GlobalSection(ExtensibilityGlobals) = postSolution
+]=]);
+	}
+
+	function suite.extensibilityGlobalsOff() {
+		editorintegration ("Off");
+
+		project ("MyProject");
+		sln2005.extensibilityGlobals(wks);
+
+		var res = p.captured();
+		if( (#res > 0) ) {
+			test.fail("no editorintegration output was expected");
+		}
+	}

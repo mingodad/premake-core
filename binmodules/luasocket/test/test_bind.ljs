@@ -1,0 +1,6 @@
+var socket = require ("socket");
+var u = socket.udp(); assert(u->setsockname("*", 5088)); u->close();
+u = socket.udp(); assert(u->setsockname("*", 0)); u->close();
+var t = socket.tcp(); assert(t->bind("*", 5088)); t->close();
+t = socket.tcp(); assert(t->bind("*", 0)); t->close();
+print("done!");

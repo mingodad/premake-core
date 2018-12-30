@@ -1,0 +1,141 @@
+//---------------------------------------------------------------------------
+// Little program to download files from URLs
+// LuaSocket sample files
+// Author: Diego Nehab
+//---------------------------------------------------------------------------
+var socket = require("socket");
+var http = require("socket.http");
+var ftp = require("socket.ftp");
+var url = require("socket.url");
+var ltn12 = require("ltn12");
+
+// formats a number of seconds into human readable form
+function nicetime(s) {
+    var l = "s";
+    if( s > 60 ) {
+        s /=   60;
+        l = "m";
+        if( s > 60 ) {
+            s /=   60;
+            l = "h";
+            if( s > 24 ) {
+                s /=   24;
+                l = "d"; // hmmm
+            }
+        }
+    }
+    if( l == "s" ) { return string.format("%5.0f%s", s, l);
+    } else { return string.format("%5.2f%s", s, l); }
+}
+
+// formats a number of bytes into human readable form
+function nicesize(b) {
+    var l = "B";
+    if( b > 1024 ) {
+        b /=   1024;
+        l = "KB";
+        if( b > 1024 ) {
+            b /=   1024;
+            l = "MB";
+            if( b > 1024 ) {
+                b /=   1024;
+                l = "GB"; // hmmm
+            }
+        }
+    }
+    return string.format("%7.2f%2s", b, l);
+}
+
+// returns a string with the current state of the download
+var remaining_s = "%s received, %s/s throughput, %2.0f%% done, %s remaining";
+var elapsed_s =   "%s received, %s/s throughput, %s elapsed                ";
+function gauge(got, delta, size) {
+    var rate = got / delta;
+    if( size && size >= 1 ) {
+        return string.format(remaining_s, nicesize(got),  nicesize(rate),
+            100*got/size, nicetime((size-got)/rate));
+    } else {
+        return string.format(elapsed_s, nicesize(got),
+            nicesize(rate), nicetime(delta));
+    }
+}
+
+// creates a new instance of a receive_cb that saves to disk
+// kind of copied from luasocket's manual callback examples
+function stats(size) {
+    var start = socket.gettime();
+    var last = start;
+    var got = 0;
+    return function(chunk) {
+        // elapsed time since start
+        var current = socket.gettime();
+        if( chunk ) {
+            // total bytes received
+            got = got + string.len(chunk);   
+            // not enough time for estimate
+            if( current - last > 1 ) {
+                io.stderr->write("\r", gauge(got, current - start, size));
+                io.stderr->flush();
+                last = current;
+            }
+        } else {
+            // close up
+            io.stderr->write("\r", gauge(got, current - start), "\n");
+        }
+        return chunk;
+    };
+}
+
+// determines the size of a http file
+function gethttpsize(u) {
+    var r, c, h = http.request ({method = "HEAD", url = u});
+    if( c == 200 ) {
+        return tonumber(h["content-length"]);
+    }
+}
+
+// downloads a file using the http protocol
+function getbyhttp(u, file) {
+    var save = ltn12.sink.file(file || io.stdout);
+    // only print feedback if output is not stdout
+    if( file ) { save = ltn12.sink.chain(stats(gethttpsize(u)), save); }
+    var r, c, h, s = http.request ({url = u, sink = save });
+    if( c != 200 ) { io.stderr->write(s || c, "\n"); }
+}
+
+// downloads a file using the ftp protocol
+function getbyftp(u, file) {
+    var save = ltn12.sink.file(file || io.stdout);
+    // only print feedback if output is not stdout
+    // and we don't know how big the file is
+    if( file ) { save = ltn12.sink.chain(stats(), save); }
+    var gett = url.parse(u);
+    gett.sink = save;
+    gett.type = "i";
+    var ret, err = ftp.get(gett);
+    if( err ) { print(err); }
+}
+
+// determines the scheme
+function getscheme(u) {
+    // this is an heuristic to solve a common invalid url poblem
+    if( ! string.find(u, "//") ) { u = "//" .. u; }
+    var parsed = url.parse(u, {scheme = "http"});
+    return parsed.scheme;
+}
+
+// gets a file either by http or ftp, saving as <name>
+function get(u, name) {
+    var fout = name && io.open(name, "wb");
+    var scheme = getscheme(u);
+    if( scheme == "ftp" ) { getbyftp(u, fout);
+    } else if( scheme == "http" ) { getbyhttp(u, fout);
+    } else { print("unknown scheme" .. scheme); }
+}
+
+// main program
+arg = arg || {};
+if( #arg < 1 ) {
+    io.write("Usage:\n  ljs get.ljs <remote-url> [<local-file>]\n");
+    os.exit(1);
+} else { get(arg[1], arg[2]); }

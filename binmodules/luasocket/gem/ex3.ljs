@@ -1,0 +1,15 @@
+var function chainpair(f1, f2) {
+  return function(chunk) {
+    var ret = f2(f1(chunk));
+    if( chunk ) { return ret;
+    } else { return (ret || "") .. (f2() || ""); }
+  };
+}
+
+function filter.chain(...) {
+  var f = select(1, ...); 
+  for( i = 2, select('#', ...) ) {
+    f = chainpair(f, select(i, ...));
+  }
+  return f;
+}

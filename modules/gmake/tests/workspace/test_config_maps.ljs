@@ -1,0 +1,78 @@
+//
+// tests/actions/make/test_config_maps.ljs
+// Validate handling of configuration maps in makefiles.
+// Copyright (c) 2012 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("make_config_maps");
+	var make = p.make;
+
+
+//
+// Setup/teardown
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		wks = test.createWorkspace();
+	}
+
+	var function prepare() {
+		make.configmap(wks);
+	}
+
+
+//
+// If no map is present, the configurations should pass through
+// to the projects unchanged.
+//
+
+	function suite.passesThroughConfigs_onNoMap() {
+		prepare();
+		test.capture ([=[
+ifeq ($(config),debug)
+  MyProject_config = debug
+endif
+ifeq ($(config),release)
+  MyProject_config = release
+endif
+		]=]);
+	}
+
+
+//
+// If a map is present, the configuration change should be applied.
+//
+
+	function suite.passesThroughConfigs_onMap() {
+		configmap ({ Debug = "Development" });
+		prepare();
+		test.capture ([=[
+ifeq ($(config),debug)
+  MyProject_config = development
+endif
+ifeq ($(config),release)
+  MyProject_config = release
+endif
+		]=]);
+	}
+
+
+//
+// If a configuration is not included in a particular project,
+// no mapping should be created.
+//
+
+	function suite.passesThroughConfigs_onNoMapRemovedConfiguration() {
+		removeconfigurations ({ "Debug" });
+		prepare();
+		test.capture ([=[
+ifeq ($(config),debug)
+endif
+ifeq ($(config),release)
+  MyProject_config = release
+endif
+		]=]);
+	}

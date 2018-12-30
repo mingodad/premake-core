@@ -1,0 +1,260 @@
+var sent = {};
+
+var from = "diego@localhost";
+var server = "localhost";
+var rcpt = "luasocket@localhost";
+
+var files = {
+    "/var/spool/mail/luasocket",
+    "/var/spool/mail/luasock1",
+    "/var/spool/mail/luasock2",
+    "/var/spool/mail/luasock3",
+};
+
+var t = socket.time();
+var err;
+
+dofile("mbox.ljs");
+var parse = mbox.parse;
+dofile("testsupport.ljs");
+
+var total = function() {
+    var t = 0;
+    for( i = 1, #sent ) {
+        t = t + sent[i].count;
+    }
+    return t;
+};
+
+var similar = function(s1, s2) {
+    return 
+    string.lower(string.gsub(s1, "%s", "")) == 
+    string.lower(string.gsub(s2, "%s", ""));
+};
+
+var fail = function(s) {
+    s = s || "failed!";
+    print(s);
+    os.exit();
+};
+
+var readfile = function(name) {
+    var f = io.open(name, "r");
+    if( ! f ) { 
+        fail("unable to open file!");
+        return null; 
+    }
+    var s = f->read("*a");
+    f->close();
+    return s;
+};
+
+var empty = function() {
+    for( i,v in ipairs(files) ) {
+        var f = io.open(v, "w");
+        if( ! f ) { 
+            fail("unable to open file!");
+        }
+        f->close();
+    }
+};
+
+var get = function() {
+    var s = "";
+    for( i,v in ipairs(files) ) {
+        s = s .. "\n" .. readfile(v);
+    }
+    return s;
+};
+
+var check_headers = function(sent, got) {
+    sent = sent || {};
+    got = got || {};
+    for( i,v in pairs(sent) ) {
+        if( ! similar(v, got[i]) ) { fail("header " .. v .. "failed!"); }
+    }
+};
+
+var check_body = function(sent, got) {
+    sent = sent || "";
+    got = got || "";
+    if( ! similar(sent, got) ) { fail("bodies differ!"); }
+};
+
+var check = function(sent, m) {
+    io.write("checking ", m.headers.title, ": ");
+    for( i = 1, #sent ) {
+        var s = sent[i];
+        if( s.title == m.headers.title && s.count > 0 ) {
+            check_headers(s.headers, m.headers);
+            check_body(s.body, m.body);
+            s.count = s.count - 1;
+            print("ok");
+            return;
+        }
+    }
+    fail("not found");
+};
+
+var insert = function(sent, message) {
+    if( type(message.rcpt) == "table" ) {
+        message.count = #message.rcpt;
+    } else { message.count = 1; }
+    message.headers = message.headers || {};
+    message.headers.title = message.title;
+    table.insert(sent, message);
+};
+
+var mark = function() {
+    var time = socket.time();
+    return { time = time };
+};
+
+var wait = function(sentinel, n) {
+    var to;
+    io.write("waiting for ", n, " messages: ");
+    while( 1 ) {
+        var mbox = parse(get());
+        if( n == #mbox ) { break; }
+        if( socket.time() - sentinel.time > 50 ) { 
+            to = 1; 
+            break;
+        }
+        socket.sleep(1);
+        io.write(".");
+        io.stdout->flush();
+    }
+    if( to ) { fail("timeout");
+    } else { print("ok"); }
+};
+
+var stuffed_body = [=[
+This message body needs to be
+stuffed because it has a dot
+.
+by itself on a line. 
+Otherwise the mailer would
+think that the dot
+.
+is the end of the message
+and the remaining text would cause
+a lot of trouble.
+]=];
+
+insert(sent, {
+    from = from,
+    rcpt = {
+        "luasocket@localhost",
+        "luasock3@dell-diego.cs.princeton.edu",
+        "luasock1@dell-diego.cs.princeton.edu"
+    },
+    body = "multiple rcpt body",
+    title = "multiple rcpt",
+});
+
+insert(sent, {
+    from = from,
+    rcpt = {
+        "luasock2@localhost",
+        "luasock3",
+        "luasock1"
+    },
+    headers = {
+        header1 = "header 1",
+        header2 = "header 2",
+        header3 = "header 3",
+        header4 = "header 4",
+        header5 = "header 5",
+        header6 = "header 6",
+    },
+    body = stuffed_body,
+    title = "complex message",
+});
+
+insert(sent, {
+    from = from,
+    rcpt = rcpt,
+    server = server,
+    body = "simple message body",
+    title = "simple message"
+});
+
+insert(sent, {
+    from = from,
+    rcpt = rcpt,
+    server = server,
+    body = stuffed_body,
+    title = "stuffed message body"
+});
+
+insert(sent, {
+    from = from,
+    rcpt = rcpt,
+    headers = {
+        header1 = "header 1",
+        header2 = "header 2",
+        header3 = "header 3",
+        header4 = "header 4",
+        header5 = "header 5",
+        header6 = "header 6",
+    },
+    title = "multiple headers"
+});
+
+insert(sent, {
+    from = from,
+    rcpt = rcpt,
+    title = "minimum message"
+});
+
+io.write("testing host not found: ");
+var c, e = socket.connect("wrong.host", 25);
+var ret;
+ret, err = socket.smtp.mail({
+    from = from,
+    rcpt = rcpt,
+    server = "wrong.host"
+});
+if( ret || e != err ) { fail("wrong error message");
+} else { print("ok"); }
+
+io.write("testing invalid from: ");
+ret, err = socket.smtp.mail({
+    from = ' " " (( _ * ', 
+    rcpt = rcpt,
+});
+if( ret || ! err ) { fail("wrong error message");
+} else { print(err); }
+
+io.write("testing no rcpt: ");
+ret, err = socket.smtp.mail({
+    from = from, 
+});
+if( ret || ! err ) { fail("wrong error message");
+} else { print(err); }
+
+io.write("clearing mailbox: ");
+empty();
+print("ok");
+
+io.write("sending messages: ");
+for( i = 1, #sent ) {
+    ret, err = socket.smtp.mail(sent[i]);
+    if( ! ret ) { fail(err); }
+    io.write("+");
+    io.stdout->flush();
+}
+print("ok");
+
+wait(mark(), total());
+
+io.write("parsing mailbox: ");
+var mbox = parse(get());
+print(#mbox .. " messages found!");
+
+for( i = 1, #mbox ) {
+    check(sent, mbox[i]);
+}
+
+print("passed all tests");
+print(string.format("done in %.2fs", socket.time() - t));

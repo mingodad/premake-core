@@ -1,0 +1,32 @@
+var socket = require ("socket");
+
+var host, port = "127.0.0.1", "5462";
+
+assert(socket.bind(host, port))->close();
+
+var sock = socket.tcp();
+sock->settimeout(0);
+
+var ok, err = sock->connect(host, port);
+assert(! ok);
+assert('timeout' == err);
+
+for( i = 1, 10 ) {
+  // select pass even if socket has error
+  var _, rec, ss;
+  _, rec, err = socket.select(null, {sock}, 1);
+  _, ss = next(rec);
+  if( ss ) {
+    assert(ss == sock);
+  } else {
+    assert('timeout' == err, 'unexpected error :' .. tostring(err));
+  } 
+  err = sock->getoption("error"); // i get 'connection refused' on WinXP
+  if( err ) {
+    print("Passed! Error is '" .. err .. "'.");
+    os.exit(0);
+  }
+}
+
+print("Fail! No error detected!");
+os.exit(1);

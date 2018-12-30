@@ -1,0 +1,434 @@
+//
+// premake.ljs
+// High-level helper functions for the project exporters.
+// Copyright (c) 2002-2015 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+
+
+
+// Store captured output text for later testing
+
+	var _captured;
+
+// The string escaping function.
+
+	var _esc = function(v) { return v; };
+
+// The output settings and defaults
+
+	var _eol = "\n";
+	var _indentString = "\t";
+	var _indentLevel = 0;
+
+// Set up the global configuration scope. There can be only one.
+
+	global("root");
+
+
+
+//-
+// Capture and store everything sent through the output stream functions
+// premake.w(), premake.x(), and premake.out(). Retrieve the captured
+// text using the premake.captured() function.
+//
+// @param fn
+//    A function to execute. Any output calls made during the execution
+//    of the function will be captured.
+// @return
+//    The captured output.
+//-
+
+	function premake.capture(fn) {
+		// start a new capture without forgetting the old one
+		var old = _captured;
+		_captured = buffered.new();
+
+		// capture
+		fn();
+
+		// build the result
+		var captured = p.captured();
+
+		// free the capture buffer.
+		buffered.close(_captured);
+
+		// restore the old capture and done
+		_captured = old;
+		return captured;
+	}
+
+
+
+//
+// Returns the captured text and stops capturing.
+//
+
+	function premake.captured() {
+		if( _captured ) {
+			return buffered.tostring(_captured);
+		} else {
+			return "";
+		}
+	}
+
+
+
+//-
+// Set the output stream end-of-line sequence.
+//
+// @param s
+//    The string to use to mark line ends, or nil to keep the existing
+//    EOL sequence.
+// @return
+//    The new EOL sequence.
+//-
+
+	function premake.eol(s) {
+		_eol = s || _eol;
+		return _eol;
+	}
+
+
+
+//-
+// Handle escaping of strings for various outputs.
+//
+// @param value
+//    If this is a string: escape it and return the new value. If it is an
+//    array, return a new array of escaped values.
+// @return
+//    If the input was a single string, returns the escaped version. If it
+//    was an array, returns an corresponding array of escaped strings.
+//-
+
+	function premake.esc(value) {
+		if( type(value) == "table" ) {
+			var result = {};
+			var n = #value;
+			for( i = 1, n ) {
+				table.insert(result, p.esc(value[i]));
+			}
+			return result;
+		}
+
+		return _esc(value || "");
+	}
+
+
+
+//-
+// Set a new string escaping function.
+//
+// @param func
+//    The new escaping function, which should take a single string argument
+//    and return the escaped version of that string. If nil, uses a default
+//    no-op function.
+//-
+
+	function premake.escaper(func) {
+		_esc = func;
+		if( ! _esc ) {
+			_esc = function (value) { return value; };
+		}
+	}
+
+
+
+//
+// Returns a boolean if the file was modified
+// Open a file for output, and call a function to actually do the writing.
+// Used by the actions to generate workspace and project files.
+//
+// @param obj
+//    A workspace or project object; will be passed to the callback function.
+// @param ext
+//    An optional extension for the generated file, with the leading dot.
+// @param callback
+//    The function responsible for writing the file, should take a workspace
+//    or project as a parameters.
+//
+
+	function premake.generate(obj, ext, callback) {
+		var output = p.capture(function () {
+			_indentLevel = 0;
+			callback(obj);
+			_indentLevel = 0;
+		});
+
+		var fn = p.filename(obj, ext);
+
+		// make sure output folder exists.
+		var dir = path.getdirectory(fn);
+		var ok, err = os.mkdir(dir);
+		if( ! ok ) {
+			error(err, 0);
+		}
+
+		var f;
+		f, err = os.writefile_ifnotequal(output, fn);
+
+		if( (f == 0) ) {
+			return false; // file not modified
+		} else if( (f < 0) ) {
+			error(err, 0);
+		} else if( (f > 0) ) {
+			printf("Generated %s...", path.getrelative(os.getcwd(), fn));
+			return true; // file modified
+		}
+	}
+
+
+
+//
+// Marks a file as modified without changing its contents
+//
+// @param obj
+//    A workspace or project object; will be passed to the callback function.
+// @param ext
+//    An optional extension for the generated file, with the leading dot.
+//
+
+	function premake.touch(obj, ext) {
+		var fn = premake.filename(obj, ext);
+
+		// make sure output folder exists.
+		var dir = path.getdirectory(fn);
+		var ok, err = os.mkdir(dir);
+		if( ! ok ) {
+			error(err, 0);
+		}
+
+		var f;
+		f, err = os.touchfile(fn);
+
+		if( (f == 0) ) {
+			return false; // file marked as modified
+		} else if( (f < 0) ) {
+			error(err, 0);
+		} else if( (f > 0) ) {
+			return true; // file created
+		}
+	}
+
+
+//-
+// Returns the full path a file generated from any of the project
+// objects (project, workspace, rule).
+//
+// @param obj
+//    The project object being generated.
+// @param ext
+//    An optional extension for the generated file, with the leading dot.
+//-
+
+function premake.filename(obj, ext) {
+	var fname = obj.location || obj.basedir;
+	if( ext && ! ext->startswith(".") ) {
+		fname = path.join(fname, ext);
+	} else {
+		fname = path.join(fname, obj.filename);
+		if( ext ) {
+			fname = fname .. ext;
+		}
+	}
+	return path.getabsolute(fname);
+}
+
+
+
+//-
+// Sets the output indentation parameters.
+//
+// @param s
+//    The indentation string.
+// @param i
+//    The new indentation level, or nil to reset to zero.
+//-
+
+	function premake.indent(s, i) {
+		_indentString = s || "\t";
+		_indentLevel = i || 0;
+	}
+
+
+
+//-
+// Write a simple, unformatted string to the output stream, with no indentation
+// or end of line sequence.
+//-
+
+	function premake.out(s) {
+		if( ! _captured ) {
+			io.write(s);
+		} else {
+			buffered.write(_captured, s);
+		}
+	}
+
+
+
+//-
+// Write a simple, unformatted string to the output stream, with no indentation,
+// and append the current EOL sequence.
+//-
+
+	function premake.outln(s) {
+		p.out(s);
+		p.out(_eol || "\n");
+	}
+
+
+
+//-
+// Write a formatted string to the exported file, after decreasing the
+// indentation level by one.
+//
+// @param i
+//    If set to a number, the indentation level will be decreased by
+//    this amount. If nil, the indentation level is decremented and
+//    no output is written. Otherwise, pass to premake.w() as the
+//    formatting string, followed by any additional arguments.
+//-
+
+	function premake.pop(i, ...) {
+		if( i == null || type(i) == "number" ) {
+			_indentLevel -= (i || 1);
+		} else {
+			--_indentLevel;
+			p.w(i, ...);
+		}
+	}
+
+
+
+//-
+// Write a formatted string to the exported file, and increase the
+// indentation level by one.
+//
+// @param i
+//    If set to a number, the indentation level will be increased by
+//    this amount. If nil, the indentation level is incremented and
+//    no output is written. Otherwise, pass to premake.w() as the
+//    formatting string, followed by any additional arguments.
+//-
+
+	function premake.push(i, ...) {
+		if( i == null || type(i) == "number" ) {
+			_indentLevel += (i || 1);
+		} else {
+			p.w(i, ...);
+			++_indentLevel;
+		}
+	}
+
+
+
+//-
+// Wrap the provided value in double quotes if it contains spaces, or
+// if it contains a shell variable of the form $(...).
+//-
+
+	function premake.quoted(value) {
+		var q = value->find(" ", 1, true);
+		if( ! q ) {
+			q = value->find("$%(.-%)", 1);
+		}
+		if( q ) {
+			value = '"' .. value .. '"';
+		}
+		return value;
+	}
+
+
+
+//
+// Output a UTF-8 BOM to the exported file.
+//
+
+	function p.utf8() {
+		p.out('\239\187\191');
+	}
+
+
+
+//-
+// Write a formatted string to the exported file, at the current
+// level of indentation, and appends an end of line sequence.
+// This gets called quite a lot, hence the very short name.
+//-
+
+	function premake.w(...) {
+		if( select("#", ...) > 0 ) {
+			p.outln(string.rep(_indentString || "\t", _indentLevel) .. string.format(...));
+		} else {
+			p.outln('');
+		}
+	}
+
+
+
+//-
+// Write a formatted string to the exported file, after passing all
+// arguments (except for the first, which is the formatting string)
+// through premake.esc().
+//-
+
+	function premake.x(msg, ...) {
+		var arg = {...};
+		for( i = 1, #arg ) {
+			arg[i] = p.esc(arg[i]);
+		}
+		p.w(msg, table.unpack(arg));
+	}
+
+
+
+//-
+// Write a opening XML element for a UTF-8 encoded file. Used by
+// several different files for different actions, so makes sense
+// to have a common call for it.
+//
+// @param upper
+//    If true, the encoding is written in uppercase.
+//-
+
+	function premake.xmlUtf8(upper) {
+		var encoding = (upper ? "UTF-8" : "utf-8");
+		p.w('<?xml version="1.0" encoding="%s"?>', encoding);
+	}
+
+
+
+//
+// These are the output shortcuts that I used before switching to the
+// indentation-aware calls above. They are still in use all over the
+// place, including lots of community code, so let's keep them around.
+//
+// @param i
+//    This will either be a printf-style formatting string suitable
+//    for passing to string.format(), OR an integer number indicating
+//    the desired level of indentation. If the latter, the formatting
+//    string should be the next argument in the list.
+// @param ...
+//    The values necessary to fill out the formatting string tokens.
+//
+
+	function _p(i, ...) {
+		if( type(i) == "number" ) {
+			_indentLevel = i;
+			p.w(...);
+		} else {
+			_indentLevel = 0;
+			p.w(i, ...);
+		}
+	}
+
+	function _x(i, ...) {
+		var arg = {...};
+		for( xi = 2, #arg ) {
+			arg[xi] = p.esc(arg[xi]);
+		}
+		_p(i, table.unpack(arg));
+	}

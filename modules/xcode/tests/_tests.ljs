@@ -1,0 +1,9 @@
+require ("xcode");
+
+return {
+	"test_header_footer.ljs",
+	"test_xcode4_project.ljs",
+	"test_xcode4_workspace.ljs",
+	"test_xcode_dependencies.ljs",
+	"test_xcode_project.ljs",
+};

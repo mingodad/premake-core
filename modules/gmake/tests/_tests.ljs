@@ -1,0 +1,33 @@
+require ("gmake");
+
+return {
+	// Makefile tests
+	"test_make_escaping.ljs",
+	"test_make_tovar.ljs",
+
+	// Makefile workspaces
+	"workspace/test_config_maps.ljs",
+	"workspace/test_default_config.ljs",
+	"workspace/test_group_rule.ljs",
+	"workspace/test_help_rule.ljs",
+	"workspace/test_project_rule.ljs",
+
+	// Makefile C/C++ projects
+	"cpp/test_clang.ljs",
+	"cpp/test_file_rules.ljs",
+	"cpp/test_flags.ljs",
+	"cpp/test_ldflags.ljs",
+	"cpp/test_make_pch.ljs",
+	"cpp/test_make_linking.ljs",
+	"cpp/test_objects.ljs",
+	"cpp/test_target_rules.ljs",
+	"cpp/test_tools.ljs",
+	"cpp/test_wiidev.ljs",
+
+	// Makefile C# projects
+	"cs/test_embed_files.ljs",
+	"cs/test_flags.ljs",
+	"cs/test_links.ljs",
+	"cs/test_response.ljs",
+	"cs/test_sources.ljs",
+};

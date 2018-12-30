@@ -1,0 +1,38 @@
+//
+// android/vsandroid_vstudio.ljs
+// vs-android integration for vstudio.
+// Copyright (c) 2012-2015 Manu Evans and the Premake project
+//
+
+	var p = premake;
+
+	var android = p.modules.android;
+	var vsandroid = p.modules.vsandroid;
+	var vstudio = p.vstudio;
+
+//
+// Add android tools to vstudio actions.
+//
+
+
+	premake.override(vstudio, "solutionPlatform", function (oldfn, cfg) {
+		var platform = oldfn(cfg);
+
+		// Bypass that pesky Win32 hack
+		if( cfg.system == premake.ANDROID && _ACTION >= "vs2015" ) {
+			if( cfg.platform == "x86" ) {
+				platform = "x86";
+			}
+		}
+
+		return platform;
+	});
+
+
+	premake.override(vstudio, "archFromConfig", function (oldfn, cfg, win32) {
+		// Bypass that pesky Win32 hack by not passing win32 down
+		if( cfg.system == premake.ANDROID && _ACTION >= "vs2015" ) {
+			return oldfn(cfg);
+		}
+		return oldfn(cfg, win32);
+	});

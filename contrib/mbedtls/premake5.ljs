@@ -1,0 +1,19 @@
+project ("mbedtls-lib");
+	language    ("C");
+	kind        ("StaticLib");
+	warnings    ("off");
+
+	includedirs ({ 'include' });
+
+	if( ! _OPTIONS["no-zlib"] ) {
+		defines     ({ 'MBEDTLS_ZLIB_SUPPORT' });
+		includedirs ({ '../zlib' });
+	}
+
+	files
+	({
+		"include/**.h",
+		"library/*.c"
+	});
+
+

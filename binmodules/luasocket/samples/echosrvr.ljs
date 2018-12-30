@@ -1,0 +1,28 @@
+//---------------------------------------------------------------------------
+// UDP sample: echo protocol server
+// LuaSocket sample files
+// Author: Diego Nehab
+//---------------------------------------------------------------------------
+var socket = require("socket");
+host = host || "127.0.0.1";
+port = port || 7;
+if( arg ) {
+    host = arg[1] || host;
+    port = arg[2] || port;
+}
+print("Binding to host '" ..host.. "' and port " ..port.. "...");
+udp = assert(socket.udp());
+assert(udp->setsockname(host, port));
+assert(udp->settimeout(5));
+ip, port = udp->getsockname();
+assert(ip, port);
+print("Waiting packets on " .. ip .. ":" .. port .. "...");
+while( 1 ) {
+	dgram, ip, port = udp->receivefrom();
+	if( dgram ) {
+		print("Echoing '" .. dgram .. "' to " .. ip .. ":" .. port);
+		udp->sendto(dgram, ip, port);
+	} else {
+        print(ip);
+    }
+}

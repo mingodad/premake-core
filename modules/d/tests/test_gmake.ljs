@@ -1,0 +1,195 @@
+//-
+// d/tests/test_gmake.ljs
+// Automated test suite for gmake project generation.
+// Copyright (c) 2011-2015 Manu Evans and the Premake project
+//-
+
+	var suite = test.declare("d_make");
+	var p = premake;
+	var m = p.modules.d;
+
+	var make = p.make;
+	var project = p.project;
+
+
+//-------------------------------------------------------------------------
+// Setup/Teardown
+//-------------------------------------------------------------------------
+
+	var wks, prj, cfg;
+
+	function suite.setup() {
+		p.escaper(make.esc);
+		wks = test.createWorkspace();
+	}
+
+	var function prepare() {
+		prj = p.workspace.getproject(wks, 1);
+	}
+
+	var function prepare_cfg(calls) {
+		prj = p.workspace.getproject(wks, 1);
+		var cfg = test.getconfig(prj, "Debug");
+		var toolset = p.tools.dmd;
+		p.callArray(calls, cfg, toolset);
+	}
+
+
+
+//
+// Check project generation
+//
+
+	function suite.make_targetRules() {
+		prepare();
+		m.make.targetRules(prj);
+		test.capture ([=[
+$(TARGET): $(SOURCEFILES) $(LDDEPS)
+	@echo Building MyProject
+	$(SILENT) $(BUILDCMD)
+	$(POSTBUILDCMDS)
+
+		]=]);
+	}
+
+	function suite.make_targetRules_separateCompilation() {
+		compilationmodel ("File");
+		prepare();
+		m.make.targetRules(prj);
+		test.capture ([=[
+$(TARGET): $(OBJECTS) $(LDDEPS)
+	@echo Linking MyProject
+	$(SILENT) $(LINKCMD)
+	$(POSTBUILDCMDS)
+
+		]=]);
+	}
+
+	function suite.make_targetRules_mixedCompilation() {
+		configuration ({ "Release" });
+			compilationmodel ("File");
+		prepare();
+		m.make.targetRules(prj);
+		test.capture ([=[
+ifeq ($(config),debug)
+$(TARGET): $(SOURCEFILES) $(LDDEPS)
+	@echo Building MyProject
+	$(SILENT) $(BUILDCMD)
+	$(POSTBUILDCMDS)
+endif
+ifeq ($(config),release)
+$(TARGET): $(OBJECTS) $(LDDEPS)
+	@echo Linking MyProject
+	$(SILENT) $(LINKCMD)
+	$(POSTBUILDCMDS)
+endif
+
+		]=]);
+	}
+
+
+	function suite.make_fileRules() {
+		files ({ "blah.d" });
+		prepare();
+		m.make.dFileRules(prj);
+		test.capture ([=[
+
+		]=]);
+	}
+
+	function suite.make_fileRules_separateCompilation() {
+		files ({ "blah.d" });
+		compilationmodel ("File");
+		prepare();
+		m.make.dFileRules(prj);
+		test.capture ([=[
+$(OBJDIR)/blah.o: blah.d
+	@echo $(notdir $<)
+	$(SILENT) $(DC) $(ALL_DFLAGS) $(OUTPUTFLAG) -c $<
+		]=]);
+	}
+
+	function suite.make_fileRules_mixedCompilation() {
+		files ({ "blah.d" });
+		configuration ({ "Release" });
+			compilationmodel ("File");
+		prepare();
+		m.make.dFileRules(prj);
+		test.capture ([=[
+$(OBJDIR)/blah.o: blah.d
+	@echo $(notdir $<)
+	$(SILENT) $(DC) $(ALL_DFLAGS) $(OUTPUTFLAG) -c $<
+		]=]);
+	}
+
+
+	function suite.make_objects() {
+		files ({ "blah.d" });
+		prepare();
+		m.make.objects(prj);
+		test.capture ([=[
+SOURCEFILES := \
+	blah.d \
+
+		]=]);
+	}
+
+	function suite.make_objects_separateCompilation() {
+		files ({ "blah.d" });
+		compilationmodel ("File");
+		prepare();
+		m.make.objects(prj);
+		test.capture ([=[
+OBJECTS := \
+	$(OBJDIR)/blah.o \
+
+		]=]);
+	}
+
+	function suite.make_objects_mixedCompilation() {
+		files ({ "blah.d" });
+		configuration ({ "Release" });
+			compilationmodel ("File");
+			files ({ "blah2.d" });
+		prepare();
+		m.make.objects(prj);
+		test.capture ([=[
+SOURCEFILES := \
+	blah.d \
+
+OBJECTS := \
+	$(OBJDIR)/blah.o \
+
+ifeq ($(config),release)
+  SOURCEFILES += \
+	blah2.d \
+
+  OBJECTS += \
+	$(OBJDIR)/blah2.o \
+
+endif
+
+		]=]);
+	}
+
+
+//
+// Check configuration generation
+//
+
+	function suite.make_allRules() {
+		prepare_cfg({ m.make.allRules });
+		test.capture ([=[
+all: $(TARGETDIR) prebuild prelink $(TARGET)
+	@:
+		]=]);
+	}
+
+	function suite.make_allRules_separateCompilation() {
+		compilationmodel ("File");
+		prepare_cfg({ m.make.allRules });
+		test.capture ([=[
+all: $(TARGETDIR) $(OBJDIR) prebuild prelink $(TARGET)
+	@:
+		]=]);
+	}

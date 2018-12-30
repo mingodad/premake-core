@@ -1,0 +1,7 @@
+return {
+	"_preload.ljs",
+	"xcode.ljs",
+	"xcode4_workspace.ljs",
+	"xcode_common.ljs",
+	"xcode_project.ljs",
+};

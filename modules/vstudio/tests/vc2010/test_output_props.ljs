@@ -1,0 +1,287 @@
+//
+// tests/actions/vstudio/vc2010/test_output_props.ljs
+// Validate generation of the output property groups.
+// Copyright (c) 2011-2013 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("vstudio_vs2010_output_props");
+	var vc2010 = p.vstudio.vc2010;
+
+
+//
+// Setup
+//
+
+	var wks;
+
+	function suite.setup() {
+		p.action.set("vs2010");
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare() {
+		var cfg = test.getconfig(prj, "Debug");
+		vc2010.outputProperties(cfg);
+	}
+
+
+//
+// Check the structure with the default project values.
+//
+
+	function suite.structureIsCorrect_onDefaultValues() {
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>true</LinkIncremental>
+	<OutDir>bin\Debug\</OutDir>
+	<IntDir>obj\Debug\</IntDir>
+	<TargetName>MyProject</TargetName>
+	<TargetExt>.exe</TargetExt>
+</PropertyGroup>
+		]=]);
+	}
+
+
+//
+// This entire block gets skipped for Makefile projects.
+//
+
+	function suite.omitsBlock_onMakefile() {
+		kind ("Makefile");
+		prepare();
+		test.isemptycapture();
+	}
+
+	function suite.omitsBlock_onNone() {
+		kind ("Makefile");
+		prepare();
+		test.isemptycapture();
+	}
+
+//
+// Static libraries should omit the link incremental element entirely.
+//
+
+	function suite.omitLinkIncremental_onStaticLib() {
+		kind ("StaticLib");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<OutDir>bin\Debug\</OutDir>
+		]=]);
+	}
+
+//
+// Optimized builds should not link incrementally.
+//
+
+	function suite.noIncrementalLink_onOptimizedBuild() {
+		optimize ("On");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>false</LinkIncremental>
+		]=]);
+	}
+
+//
+// The target directory is applied, if specified.
+//
+
+	function suite.outDir_onTargetDir() {
+		targetdir ("../bin");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>true</LinkIncremental>
+	<OutDir>..\bin\</OutDir>
+		]=]);
+	}
+
+//
+// The objeccts directory is applied, if specified.
+//
+
+	function suite.intDir_onTargetDir() {
+		objdir ("../tmp");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>true</LinkIncremental>
+	<OutDir>bin\Debug\</OutDir>
+	<IntDir>..\tmp\Debug\</IntDir>
+		]=]);
+	}
+
+//
+// The target name is applied, if specified.
+//
+
+	function suite.targetName_onTargetName() {
+		targetname ("MyTarget");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>true</LinkIncremental>
+	<OutDir>bin\Debug\</OutDir>
+	<IntDir>obj\Debug\</IntDir>
+	<TargetName>MyTarget</TargetName>
+		]=]);
+	}
+
+//
+// If the NoImportLib flag is set, add the IgnoreImportLibrary element.
+//
+
+	function suite.ignoreImportLib_onNoImportLib() {
+		kind ("SharedLib");
+		flags ("NoImportLib");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>true</LinkIncremental>
+	<IgnoreImportLibrary>true</IgnoreImportLibrary>
+		]=]);
+	}
+
+	function suite.omitIgnoreImportLib_onNonSharedLib() {
+		kind ("ConsoleApp");
+		flags ("NoImportLib");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>true</LinkIncremental>
+	<OutDir>bin\Debug\</OutDir>
+		]=]);
+	}
+
+
+//
+// If the NoManifest flag is set, add the GenerateManifest element.
+//
+
+	function suite.generateManifest_onNoManifest() {
+		flags ("NoManifest");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>true</LinkIncremental>
+	<OutDir>bin\Debug\</OutDir>
+	<IntDir>obj\Debug\</IntDir>
+	<TargetName>MyProject</TargetName>
+	<TargetExt>.exe</TargetExt>
+	<GenerateManifest>false</GenerateManifest>
+		]=]);
+	}
+
+
+//-
+// The <TargetExt> should be split if there is no extension.
+//-
+
+	function suite.splitTargetExt_onNoTargetExtension() {
+		targetextension ("");
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>true</LinkIncremental>
+	<OutDir>bin\Debug\</OutDir>
+	<IntDir>obj\Debug\</IntDir>
+	<TargetName>MyProject</TargetName>
+	<TargetExt>
+	</TargetExt>
+</PropertyGroup>
+		]=]);
+	}
+
+
+
+//
+// Check the handling of extra cleaning extensions.
+//
+
+	function suite.extensionsToDeleteOnClean() {
+		cleanextensions ({ ".temp1", ".temp2" });
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>true</LinkIncremental>
+	<OutDir>bin\Debug\</OutDir>
+	<IntDir>obj\Debug\</IntDir>
+	<TargetName>MyProject</TargetName>
+	<TargetExt>.exe</TargetExt>
+	<ExtensionsToDeleteOnClean>*.temp1;*.temp2;$(ExtensionsToDeleteOnClean)</ExtensionsToDeleteOnClean>
+</PropertyGroup>
+		]=]);
+	}
+
+
+//
+// Check the handling of the VC++ Directories.
+//
+
+	function suite.onSystemIncludeDirs() {
+		sysincludedirs ({ "$(DXSDK_DIR)/Include" });
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>true</LinkIncremental>
+	<OutDir>bin\Debug\</OutDir>
+	<IntDir>obj\Debug\</IntDir>
+	<TargetName>MyProject</TargetName>
+	<TargetExt>.exe</TargetExt>
+	<IncludePath>$(DXSDK_DIR)\Include;$(IncludePath)</IncludePath>
+</PropertyGroup>
+		]=]);
+	}
+
+	function suite.onSystemLibraryDirs() {
+		syslibdirs ({ "$(DXSDK_DIR)/lib/x86" });
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>true</LinkIncremental>
+	<OutDir>bin\Debug\</OutDir>
+	<IntDir>obj\Debug\</IntDir>
+	<TargetName>MyProject</TargetName>
+	<TargetExt>.exe</TargetExt>
+	<LibraryPath>$(DXSDK_DIR)\lib\x86;$(LibraryPath)</LibraryPath>
+</PropertyGroup>
+		]=]);
+	}
+
+//
+// Check the handling of the VC++ ExecutablePath.
+//
+
+	function suite.onBinDirsRelative() {
+		bindirs ({ "../Include" });
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>true</LinkIncremental>
+	<OutDir>bin\Debug\</OutDir>
+	<IntDir>obj\Debug\</IntDir>
+	<TargetName>MyProject</TargetName>
+	<TargetExt>.exe</TargetExt>
+	<ExecutablePath>$(ProjectDir)..\Include;$(ExecutablePath)</ExecutablePath>
+</PropertyGroup>
+		]=]);
+	}
+
+	function suite.onBinDirsAbsolute() {
+		bindirs ({ "C:\\Include" });
+		prepare();
+		test.capture ([=[
+<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+	<LinkIncremental>true</LinkIncremental>
+	<OutDir>bin\Debug\</OutDir>
+	<IntDir>obj\Debug\</IntDir>
+	<TargetName>MyProject</TargetName>
+	<TargetExt>.exe</TargetExt>
+	<ExecutablePath>C:\Include;$(ExecutablePath)</ExecutablePath>
+</PropertyGroup>
+		]=]);
+	}

@@ -1,0 +1,2797 @@
+//
+// vs2010_vcxproj.ljs
+// Generate a Visual Studio 201x C/C++ project.
+// Copyright (c) Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	p.vstudio.vc2010 = {};
+
+	var vstudio = p.vstudio;
+	var project = p.project;
+	var config = p.config;
+	var fileconfig = p.fileconfig;
+	var tree = p.tree;
+
+	var m = p.vstudio.vc2010;
+
+
+//-
+// Add namespace for element definition lists for p.callArray()
+//-
+
+	m.elements = {};
+	m.conditionalElements = {};
+
+//
+// Generate a Visual Studio 201x C++ project, with support for the new platforms API.
+//
+
+	m.elements.project = function(prj) {
+		return {
+			m.xmlDeclaration,
+			m.project,
+			m.projectConfigurations,
+			m.globals,
+			m.importDefaultProps,
+			m.configurationPropertiesGroup,
+			m.importLanguageSettings,
+			m.importExtensionSettings,
+			m.propertySheetGroup,
+			m.userMacros,
+			m.outputPropertiesGroup,
+			m.itemDefinitionGroups,
+			m.assemblyReferences,
+			m.files,
+			m.projectReferences,
+			m.importLanguageTargets,
+			m.importExtensionTargets,
+			m.ensureNuGetPackageBuildImports,
+		};
+	};
+
+	function m.generate(prj) {
+		p.utf8();
+		p.callArray(m.elements.project, prj);
+		p.out('</Project>');
+	}
+
+
+//
+// Output the XML declaration and opening <Project> tag.
+//
+
+	function m.project(prj) {
+		var action = p.action.current();
+		p.push('<Project DefaultTargets="Build" ToolsVersion="%s" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">',
+			action.vstudio.toolsVersion);
+	}
+
+
+//
+// Write out the list of project configurations, which pairs build
+// configurations with architectures.
+//
+
+	function m.projectConfigurations(prj) {
+
+		// build a list of all architectures used in this project
+		var platforms = {};
+		for( cfg in project.eachconfig(prj) ) {
+			var arch = vstudio.archFromConfig(cfg, true);
+			if( ! table.contains(platforms, arch) ) {
+				table.insert(platforms, arch);
+			}
+		}
+
+		var configs = {};
+		p.push('<ItemGroup Label="ProjectConfigurations">');
+		for( cfg in project.eachconfig(prj) ) {
+			for( _, arch in ipairs(platforms) ) {
+				var prjcfg = vstudio.projectConfig(cfg, arch);
+				if( ! configs[prjcfg] ) {
+					configs[prjcfg] = prjcfg;
+					p.push('<ProjectConfiguration Include="%s">', vstudio.projectConfig(cfg, arch));
+					p.x('<Configuration>%s</Configuration>', vstudio.projectPlatform(cfg));
+					p.w('<Platform>%s</Platform>', arch);
+					p.pop('</ProjectConfiguration>');
+				}
+			}
+		}
+		p.pop('</ItemGroup>');
+	}
+
+
+//
+// Write out the TargetFrameworkVersion property.
+//
+
+	function m.targetFramework(prj) {
+		var action = p.action.current();
+		var tools = string.format(' ToolsVersion="%s"', action.vstudio.toolsVersion);
+
+		var framework = prj.dotnetframework || action.vstudio.targetFramework || "4.0";
+		p.w('<TargetFrameworkVersion>v%s</TargetFrameworkVersion>', framework);
+	}
+
+
+
+//
+// Write out the Globals property group.
+//
+
+	m.elements.globals = function(prj) {
+		return {
+			m.projectGuid,
+			m.ignoreWarnDuplicateFilename,
+			m.keyword,
+			m.projectName,
+			m.preferredToolArchitecture,
+			m.targetPlatformVersionGlobal,
+		};
+	};
+
+	m.elements.globalsCondition = function(prj, cfg) {
+		return {
+			m.targetPlatformVersionCondition,
+		};
+	};
+
+	function m.globals(prj) {
+
+		// Write out the project-level globals
+		m.propertyGroup(null, "Globals");
+		p.callArray(m.elements.globals, prj);
+		p.pop('</PropertyGroup>');
+
+		// Write out the configurable globals
+		for( cfg in project.eachconfig(prj) ) {
+
+			// Find out whether we're going to actually write a property out
+			var captured = p.capture(	function() {
+										p.push();
+										p.callArray(m.elements.globalsCondition, prj, cfg);
+										p.pop();
+										});
+
+			// If we do have something, create the entry, skip otherwise
+			if( captured != '' ) {
+				m.propertyGroup(cfg, "Globals");
+				p.callArray(m.elements.globalsCondition, prj, cfg);
+				p.pop('</PropertyGroup>');
+			}
+
+		}
+
+	}
+
+
+//
+// Write out the configuration property group: what kind of binary it
+// produces, and some global settings.
+//
+
+	m.elements.configurationProperties = function(cfg) {
+		if( cfg.kind == p.UTILITY ) {
+			return {
+				m.configurationType,
+				m.platformToolset,
+			};
+		} else {
+			return {
+				m.configurationType,
+				m.useDebugLibraries,
+				m.useOfMfc,
+				m.useOfAtl,
+				m.clrSupport,
+				m.characterSet,
+				m.platformToolset,
+				m.wholeProgramOptimization,
+				m.nmakeOutDirs,
+				m.windowsSDKDesktopARMSupport,
+			};
+		}
+	};
+
+	function m.configurationProperties(cfg) {
+		m.propertyGroup(cfg, "Configuration");
+		p.callArray(m.elements.configurationProperties, cfg);
+		p.pop('</PropertyGroup>');
+	}
+
+	function m.configurationPropertiesGroup(prj) {
+		for( cfg in project.eachconfig(prj) ) {
+			m.configurationProperties(cfg);
+		}
+	}
+
+
+
+//
+// Write the output property group, which includes the output and intermediate
+// directories, manifest, etc.
+//
+
+	m.elements.outputProperties = function(cfg) {
+		if( cfg.kind == p.UTILITY ) {
+			return {
+				m.outDir,
+				m.intDir,
+				m.extensionsToDeleteOnClean,
+				m.executablePath,
+			};
+		} else {
+			return {
+				m.linkIncremental,
+				m.ignoreImportLibrary,
+				m.outDir,
+				m.intDir,
+				m.targetName,
+				m.targetExt,
+				m.includePath,
+				m.libraryPath,
+				m.generateManifest,
+				m.extensionsToDeleteOnClean,
+				m.executablePath,
+			};
+		}
+	};
+
+	function m.outputProperties(cfg) {
+		if( ! vstudio.isMakefile(cfg) ) {
+			m.propertyGroup(cfg);
+			p.callArray(m.elements.outputProperties, cfg);
+			p.pop('</PropertyGroup>');
+		}
+	}
+
+
+//
+// Write the NMake property group for Makefile projects, which includes the custom
+// build commands, output file location, etc.
+//
+
+	m.elements.nmakeProperties = function(cfg) {
+		return {
+			m.executablePath,
+			m.includePath,
+			m.libraryPath,
+			m.nmakeOutput,
+			m.nmakeBuildCommands,
+			m.nmakeRebuildCommands,
+			m.nmakeCleanCommands,
+			m.nmakePreprocessorDefinitions,
+			m.nmakeIncludeDirs
+		};
+	};
+
+	function m.nmakeProperties(cfg) {
+		if( vstudio.isMakefile(cfg) ) {
+			m.propertyGroup(cfg);
+			p.callArray(m.elements.nmakeProperties, cfg);
+			p.pop('</PropertyGroup>');
+		}
+	}
+
+
+//
+// Output properties and NMake properties should appear side-by-side
+// for each configuration.
+//
+
+	function m.outputPropertiesGroup(prj) {
+		for( cfg in project.eachconfig(prj) ) {
+			m.outputProperties(cfg);
+			m.nmakeProperties(cfg);
+		}
+	}
+
+
+
+//
+// Write a configuration's item definition group, which contains all
+// of the per-configuration compile and link settings.
+//
+
+	m.elements.itemDefinitionGroup = function(cfg) {
+		if( cfg.kind == p.UTILITY ) {
+			return {
+				m.ruleVars,
+				m.buildEvents,
+				m.buildLog,
+			};
+		} else {
+			return {
+				m.clCompile,
+				m.fxCompile,
+				m.resourceCompile,
+				m.linker,
+				m.manifest,
+				m.buildEvents,
+				m.ruleVars,
+				m.buildLog,
+			};
+		}
+	};
+
+	function m.itemDefinitionGroup(cfg) {
+		if( ! vstudio.isMakefile(cfg) ) {
+			p.push('<ItemDefinitionGroup %s>', m.condition(cfg));
+			p.callArray(m.elements.itemDefinitionGroup, cfg);
+			p.pop('</ItemDefinitionGroup>');
+
+		} else {
+			if( cfg == project.getfirstconfig(cfg.project) ) {
+				p.w('<ItemDefinitionGroup>');
+				p.w('</ItemDefinitionGroup>');
+			}
+		}
+	}
+
+	function m.itemDefinitionGroups(prj) {
+		for( cfg in project.eachconfig(prj) ) {
+			m.itemDefinitionGroup(cfg);
+		}
+	}
+
+
+
+//
+// Write the the <ClCompile> compiler settings block.
+//
+
+	m.elements.clCompile = function(cfg) {
+		var calls = {
+			m.precompiledHeader,
+			m.warningLevel,
+			m.treatWarningAsError,
+			m.disableSpecificWarnings,
+			m.treatSpecificWarningsAsErrors,
+			m.basicRuntimeChecks,
+			m.clCompilePreprocessorDefinitions,
+			m.clCompileUndefinePreprocessorDefinitions,
+			m.clCompileAdditionalIncludeDirectories,
+			m.clCompileAdditionalUsingDirectories,
+			m.forceIncludes,
+			m.debugInformationFormat,
+			m.optimization,
+			m.functionLevelLinking,
+			m.intrinsicFunctions,
+			m.minimalRebuild,
+			m.omitFramePointers,
+			m.stringPooling,
+			m.runtimeLibrary,
+			m.omitDefaultLib,
+			m.exceptionHandling,
+			m.runtimeTypeInfo,
+			m.bufferSecurityCheck,
+			m.treatWChar_tAsBuiltInType,
+			m.floatingPointModel,
+			m.floatingPointExceptions,
+			m.inlineFunctionExpansion,
+			m.enableEnhancedInstructionSet,
+			m.multiProcessorCompilation,
+			m.additionalCompileOptions,
+			m.compileAs,
+			m.callingConvention,
+			m.languageStandard,
+			m.structMemberAlignment,
+		};
+
+		if( cfg.kind == p.STATICLIB ) {
+			table.insert(calls, m.programDatabaseFileName);
+		}
+
+		return calls;
+	};
+
+	function m.clCompile(cfg) {
+		p.push('<ClCompile>');
+		p.callArray(m.elements.clCompile, cfg);
+		p.pop('</ClCompile>');
+	}
+
+
+//
+// Write the <FxCompile> settings block.
+//
+
+	m.elements.fxCompile = function(cfg) {
+		return {
+			m.fxCompilePreprocessorDefinition,
+			m.fxCompileShaderType,
+			m.fxCompileShaderModel,
+			m.fxCompileShaderEntry,
+			m.fxCompileShaderVariableName,
+			m.fxCompileShaderHeaderOutput,
+			m.fxCompileShaderObjectOutput,
+			m.fxCompileShaderAssembler,
+			m.fxCompileShaderAssemblerOutput,
+			m.fxCompileShaderAdditionalOptions,
+		};
+	};
+
+	function m.fxCompile(cfg) {
+		if( p.config.hasFile(cfg, path.ishlslfile) ) {
+			var contents = p.capture(function () {
+				p.push();
+				p.callArray(m.elements.fxCompile, cfg);
+				p.pop();
+			});
+
+			if( #contents > 0 ) {
+				p.push('<FxCompile>');
+				p.outln(contents);
+				p.pop('</FxCompile>');
+			}
+		}
+	}
+
+
+//
+// Write out the resource compiler block.
+//
+
+	m.elements.resourceCompile = function(cfg) {
+		return {
+			m.resourcePreprocessorDefinitions,
+			m.resourceAdditionalIncludeDirectories,
+			m.culture,
+		};
+	};
+
+	function m.resourceCompile(cfg) {
+		if( p.config.hasFile(cfg, path.isresourcefile) ) {
+			var contents = p.capture(function () {
+				p.push();
+				p.callArray(m.elements.resourceCompile, cfg);
+				p.pop();
+			});
+
+			if( #contents > 0 ) {
+				p.push('<ResourceCompile>');
+				p.outln(contents);
+				p.pop('</ResourceCompile>');
+			}
+		}
+	}
+
+
+//
+// Write out the linker tool block.
+//
+
+	m.elements.linker = function(cfg, explicit) {
+		return {
+			m.link,
+			m.lib,
+			m.linkLibraryDependencies,
+		};
+	};
+
+	function m.linker(cfg) {
+		var explicit = vstudio.needsExplicitLink(cfg);
+		p.callArray(m.elements.linker, cfg, explicit);
+	}
+
+
+
+	m.elements.link = function(cfg, explicit) {
+		if( cfg.kind == p.STATICLIB ) {
+			return {
+				m.subSystem,
+				m.fullProgramDatabaseFile,
+				m.generateDebugInformation,
+				m.optimizeReferences,
+			};
+		} else {
+			return {
+				m.subSystem,
+				m.fullProgramDatabaseFile,
+				m.generateDebugInformation,
+				m.optimizeReferences,
+				m.additionalDependencies,
+				m.additionalLibraryDirectories,
+				m.importLibrary,
+				m.entryPointSymbol,
+				m.generateMapFile,
+				m.moduleDefinitionFile,
+				m.treatLinkerWarningAsErrors,
+				m.ignoreDefaultLibraries,
+				m.largeAddressAware,
+				m.targetMachine,
+				m.additionalLinkOptions,
+				m.programDatabaseFile,
+			};
+		}
+	};
+
+	function m.link(cfg, explicit) {
+		var contents = p.capture(function () {
+			p.push();
+			p.callArray(m.elements.link, cfg, explicit);
+			p.pop();
+		});
+		if( #contents > 0 ) {
+			p.push('<Link>');
+			p.outln(contents);
+			p.pop('</Link>');
+		}
+	}
+
+
+
+	m.elements.lib = function(cfg, explicit) {
+		if( cfg.kind == p.STATICLIB ) {
+			return {
+				m.additionalDependencies,
+				m.additionalLibraryDirectories,
+				m.treatLinkerWarningAsErrors,
+				m.targetMachine,
+				m.additionalLinkOptions,
+			};
+		} else {
+			return {};
+		}
+	};
+
+	function m.lib(cfg, explicit) {
+		var contents = p.capture(function () {
+			p.push();
+			p.callArray(m.elements.lib, cfg, explicit);
+			p.pop();
+		});
+		if( #contents > 0 ) {
+			p.push('<Lib>');
+			p.outln(contents);
+			p.pop('</Lib>');
+		}
+	}
+
+
+
+//
+// Write the manifest section.
+//
+
+	m.elements.manifest = function(cfg) {
+		return {
+			m.enableDpiAwareness,
+			m.additionalManifestFiles,
+		};
+	};
+
+	function m.manifest(cfg) {
+		if( cfg.kind != p.STATICLIB ) {
+			var contents = p.capture(function () {
+				p.push();
+				p.callArray(m.elements.manifest, cfg);
+				p.pop();
+			});
+			if( #contents > 0 ) {
+				p.push('<Manifest>');
+				p.outln(contents);
+				p.pop('</Manifest>');
+			}
+		}
+	}
+
+
+
+//-
+// Write out the pre- and post-build event settings.
+//-
+
+	function m.buildEvents(cfg) {
+		var write = function (event) {
+			var name = event .. "Event";
+			var field = event->lower();
+			var steps = cfg[field .. "commands"];
+			var msg = cfg[field .. "message"];
+
+			if( #steps > 0 ) {
+				steps = os.translateCommandsAndPaths(steps, cfg.project.basedir, cfg.project.location);
+				p.push('<%s>', name);
+				p.x('<Command>%s</Command>', table.implode(steps, "", "", "\r\n"));
+				if( msg ) {
+					p.x('<Message>%s</Message>', msg);
+				}
+				p.pop('</%s>', name);
+			}
+		};
+
+		write("PreBuild");
+		write("PreLink");
+		write("PostBuild");
+	}
+
+
+
+//-
+// Transform property to string
+//-
+
+	function m.getRulePropertyString(rule, prop, value, kind) {
+		// list of paths
+		if( kind == "list:path" ) {
+			return table.concat(vstudio.path(cfg, value), ';');
+		}
+	
+		// path
+		if( kind == "path" ) {
+			return vstudio.path(cfg, value);
+		}
+
+		// list
+		if( type(value) == "table" ) {
+			return table.concat(value, ";");
+		}
+
+		// enum
+		if( prop.values ) {
+			value = table.findKeyByValue(prop.values, value);
+		}
+
+		// primitive
+		return tostring(value);
+	}
+
+
+
+//-
+// Write out project-level custom rule variables.
+//-
+
+	function m.ruleVars(cfg) {
+		for( i = 1, #cfg.rules ) {
+			var rule = p.global.getRule(cfg.rules[i]);
+
+			var contents = p.capture(function () {
+				p.push();
+				for( prop in p.rule.eachProperty(rule) ) {
+					var fld = p.rule.getPropertyField(rule, prop);
+					var value = cfg[fld.name];
+					if( value != null ) {
+						value = m.getRulePropertyString(rule, prop, value, fld.kind);
+
+						if( value != null && #value > 0 ) {
+							m.element(prop.name, null, '%s', value);
+						}
+					}
+				}
+				p.pop();
+			});
+
+			if( #contents > 0 ) {
+				p.push('<%s>', rule.name);
+				p.outln(contents);
+				p.pop('</%s>', rule.name);
+			}
+		}
+	}
+
+
+//
+// Reference any managed assemblies listed in the links()
+//
+
+	function m.assemblyReferences(prj) {
+		// Visual Studio doesn't support per-config references; use
+		// whatever is contained in the first configuration
+		var cfg = project.getfirstconfig(prj);
+
+		var refs = config.getlinks(cfg, "system", "fullpath", "managed");
+		if( #refs > 0 ) {
+			p.push('<ItemGroup>');
+			for( i = 1, #refs ) {
+				var value = refs[i];
+
+				// If the link contains a '/' then it is a relative path to
+				// a local assembly. Otherwise treat it as a system assembly.
+				if( value->find('/', 1, true) ) {
+					p.push('<Reference Include="%s">', path.getbasename(value));
+					p.x('<HintPath>%s</HintPath>', path.translate(value));
+					p.pop('</Reference>');
+				} else {
+					p.x('<Reference Include="%s" />', path.getbasename(value));
+				}
+			}
+			p.pop('</ItemGroup>');
+		}
+	}
+
+
+	function m.generatedFile(cfg, file) {
+		if( file.generated ) {
+			var path = path.translate(file.dependsOn.relpath);
+			m.element("AutoGen", null, 'true');
+			m.element("DependentUpon", null, path);
+		}
+	}
+
+
+//-
+// Write out the list of source code files, and any associated configuration.
+//-
+
+	function m.files(prj) {
+		var groups = m.categorizeSources(prj);
+		for( _, group in ipairs(groups) ) {
+			group.category.emitFiles(prj, group);
+		}
+	}
+
+
+	m.categories = {};
+
+//-
+// ClInclude group
+//-
+	m.categories.ClInclude = {
+		name       = "ClInclude",
+		extensions = { ".h", ".hh", ".hpp", ".hxx", ".inl" },
+		priority   = 1,
+
+		emitFiles = function(prj, group) {
+			m.emitFiles(prj, group, "ClInclude", {m.generatedFile});
+		},
+
+		emitFilter = function(prj, group) {
+			m.filterGroup(prj, group, "ClInclude");
+		}
+	};
+
+
+//-
+// ClCompile group
+//-
+	m.categories.ClCompile = {
+		name       = "ClCompile",
+		extensions = { ".cc", ".cpp", ".cxx", ".c", ".s", ".m", ".mm" },
+		priority   = 2,
+
+		emitFiles = function(prj, group) {
+			var fileCfgFunc = function(fcfg, condition) {
+				if( fcfg ) {
+					return {
+						m.excludedFromBuild,
+						m.objectFileName,
+						m.clCompilePreprocessorDefinitions,
+						m.clCompileUndefinePreprocessorDefinitions,
+						m.optimization,
+						m.forceIncludes,
+						m.precompiledHeader,
+						m.enableEnhancedInstructionSet,
+						m.additionalCompileOptions,
+						m.disableSpecificWarnings,
+						m.treatSpecificWarningsAsErrors,
+						m.basicRuntimeChecks,
+						m.exceptionHandling,
+						m.compileAsManaged,
+						m.compileAs,
+						m.runtimeTypeInfo,
+						m.warningLevelFile,
+					};
+				} else {
+					return {
+						m.excludedFromBuild
+					};
+				}
+			};
+
+			m.emitFiles(prj, group, "ClCompile", {m.generatedFile}, fileCfgFunc);
+		},
+
+		emitFilter = function(prj, group) {
+			m.filterGroup(prj, group, "ClCompile");
+		}
+	};
+
+
+//-
+// FxCompile group
+//-
+	m.categories.FxCompile = {
+		name	   = "FxCompile",
+		extensions = { ".hlsl" },
+		priority   = 4,
+
+		emitFiles = function(prj, group) {
+			var fileCfgFunc = function(fcfg, condition) {
+				if( fcfg ) {
+					return {
+						m.excludedFromBuild,
+						m.fxCompilePreprocessorDefinition,
+						m.fxCompileShaderType,
+						m.fxCompileShaderModel,
+						m.fxCompileShaderEntry,
+						m.fxCompileShaderVariableName,
+						m.fxCompileShaderHeaderOutput,
+						m.fxCompileShaderObjectOutput,
+						m.fxCompileShaderAssembler,
+						m.fxCompileShaderAssemblerOutput,
+						m.fxCompileShaderAdditionalOptions,
+					};
+				} else {
+					return {
+						m.excludedFromBuild
+					};
+				}
+			};
+
+			m.emitFiles(prj, group, "FxCompile", null, fileCfgFunc);
+		},
+
+		emitFilter = function(prj, group) {
+			m.filterGroup(prj, group, "FxCompile");
+		}
+	};
+
+
+//-
+// None group
+//-
+	m.categories.None = {
+		name = "None",
+		priority = 5,
+
+		emitFiles = function(prj, group) {
+			m.emitFiles(prj, group, "None", {m.generatedFile});
+		},
+
+		emitFilter = function(prj, group) {
+			m.filterGroup(prj, group, "None");
+		}
+	};
+
+
+//-
+// ResourceCompile group
+//-
+	m.categories.ResourceCompile = {
+		name       = "ResourceCompile",
+		extensions = ".rc",
+		priority   = 6,
+
+		emitFiles = function(prj, group) {
+			var fileCfgFunc = {
+				m.excludedFromBuild
+			};
+
+			m.emitFiles(prj, group, "ResourceCompile", null, fileCfgFunc, function(cfg) {
+				return cfg.system == p.WINDOWS;
+			});
+		},
+
+		emitFilter = function(prj, group) {
+			m.filterGroup(prj, group, "ResourceCompile");
+		}
+	};
+
+
+//-
+// CustomBuild group
+//-
+	m.categories.CustomBuild = {
+		name = "CustomBuild",
+		priority = 7,
+
+		emitFiles = function(prj, group) {
+			var fileFunc = {
+				m.fileType
+			};
+
+			var fileCfgFunc = {
+				m.excludedFromBuild,
+				m.buildCommands,
+				m.buildOutputs,
+				m.linkObjects,
+				m.buildMessage,
+				m.buildAdditionalInputs
+			};
+
+			m.emitFiles(prj, group, "CustomBuild", fileFunc, fileCfgFunc, function (cfg, fcfg) {
+				return fileconfig.hasCustomBuildRule(fcfg);
+			});
+		},
+
+		emitFilter = function(prj, group) {
+			m.filterGroup(prj, group, "CustomBuild");
+		}
+	};
+
+
+//-
+// Midl group
+//-
+	m.categories.Midl = {
+		name       = "Midl",
+		extensions = ".idl",
+		priority   = 8,
+
+		emitFiles = function(prj, group) {
+			var fileCfgFunc = {
+				m.excludedFromBuild
+			};
+
+			m.emitFiles(prj, group, "Midl", null, fileCfgFunc, function(cfg) {
+				return cfg.system == p.WINDOWS;
+			});
+		},
+
+		emitFilter = function(prj, group) {
+			m.filterGroup(prj, group, "Midl");
+		}
+	};
+
+
+//-
+// Masm group
+//-
+	m.categories.Masm = {
+		name       = "Masm",
+		extensions = ".asm",
+		priority   = 9,
+
+		emitFiles = function(prj, group) {
+			var fileCfgFunc = function(fcfg, condition) {
+				if( fcfg ) {
+					return {
+						m.MasmPreprocessorDefinitions,
+						m.excludedFromBuild,
+						m.exceptionHandlingSEH,
+					};
+				} else {
+					return {
+						m.excludedFromBuild
+					};
+				}
+			};
+			m.emitFiles(prj, group, "Masm", null, fileCfgFunc);
+		},
+
+		emitFilter = function(prj, group) {
+			m.filterGroup(prj, group, "Masm");
+		},
+
+		emitExtensionSettings = function(prj, group) {
+			p.w('<Import Project="$(VCTargetsPath)\\BuildCustomizations\\masm.props" />');
+		},
+
+		emitExtensionTargets = function(prj, group) {
+			p.w('<Import Project="$(VCTargetsPath)\\BuildCustomizations\\masm.targets" />');
+		}
+	};
+
+
+//-
+// Image group
+//-
+	m.categories.Image = {
+		name       = "Image",
+		extensions = { ".gif", ".jpg", ".jpe", ".png", ".bmp", ".dib", "*.tif", "*.wmf", "*.ras", "*.eps", "*.pcx", "*.pcd", "*.tga", "*.dds" },
+		priority   = 10,
+
+		emitFiles = function(prj, group) {
+			var fileCfgFunc = function(fcfg, condition) {
+				return {
+					m.excludedFromBuild
+				};
+			};
+			m.emitFiles(prj, group, "Image", null, fileCfgFunc);
+		},
+
+		emitFilter = function(prj, group) {
+			m.filterGroup(prj, group, "Image");
+		}
+	};
+
+
+//-
+// Natvis group
+//-
+	m.categories.Natvis = {
+		name       = "Natvis",
+		extensions = { ".natvis" },
+		priority   = 11,
+
+		emitFiles = function(prj, group) {
+			m.emitFiles(prj, group, "Natvis", {m.generatedFile});
+		},
+
+		emitFilter = function(prj, group) {
+			m.filterGroup(prj, group, "Natvis");
+		}
+	};
+
+
+//-
+// Categorize files into groups.
+//-
+	function m.categorizeSources(prj) {
+		// if we already did this, return the cached result.
+		if( prj._vc2010_sources ) {
+			return prj._vc2010_sources;
+		}
+
+		// build the new group table.
+		var result = {};
+		var groups = {};
+		prj._vc2010_sources = result;
+
+		var tr = project.getsourcetree(prj);
+		tree.traverse(tr, {
+			onleaf = function(node) {
+				var cat = m.categorizeFile(prj, node);
+				groups[cat.name] = groups[cat.name] || {
+					category = cat,
+					files = {}
+				};
+				table.insert(groups[cat.name].files, node);
+			}
+		});
+
+		// sort by relative-to path; otherwise VS will reorder the files
+		for( name, group in pairs(groups) ) {
+			table.sort(group.files, function (a, b) {
+				return a.relpath < b.relpath;
+			});
+			table.insert(result, group);
+		}
+
+		// sort by category priority then name; so we get stable results.
+		table.sort(result, function (a, b) {
+			if( (a.category.priority == b.category.priority) ) {
+				return a.category.name < b.category.name;
+			}
+			return a.category.priority < b.category.priority;
+		});
+
+		return result;
+	}
+
+
+	function m.categorizeFile(prj, file) {
+		for( cfg in project.eachconfig(prj) ) {
+			var fcfg = fileconfig.getconfig(file, cfg);
+			if( fcfg ) {
+				// If any configuration for this file uses a custom build step, that's the category to use
+				if( fileconfig.hasCustomBuildRule(fcfg) ) {
+					return m.categories.CustomBuild;
+				}
+
+				// also check for buildaction
+				if( fcfg.buildaction ) {
+					return m.categories[fcfg.buildaction] || m.categories.None;
+				}
+			}
+		}
+
+		// If there is a custom rule associated with it, use that
+		var rule = p.global.getRuleForFile(file.name, prj.rules);
+		if( rule ) {
+			return {
+				name      = rule.name,
+				priority  = 100,
+				rule      = rule,
+				emitFiles = function(prj, group) {
+					m.emitRuleFiles(prj, group);
+				},
+				emitFilter = function(prj, group) {
+					m.filterGroup(prj, group, group.category.name);
+				}
+			};
+		}
+
+		// Otherwise use the file extension to deduce a category
+		for( _, cat in pairs(m.categories) ) {
+			if( cat.extensions && path.hasextension(file.name, cat.extensions) ) {
+				return cat;
+			}
+		}
+
+		return m.categories.None;
+	}
+
+
+	function m.configPair(cfg) {
+		return vstudio.projectPlatform(cfg) .. "|" .. vstudio.archFromConfig(cfg, true);
+	}
+
+
+	function m.getTotalCfgCount(prj) {
+		if( prj._totalCfgCount ) {
+			return prj._totalCfgCount;
+		} else {
+			var result = 0;
+			for( _ in p.project.eachconfig(prj) ) {
+				++result    ;
+			}
+			// cache result
+			prj._totalCfgCount = result;
+			return result;
+		}
+	}
+
+
+	function m.indexConditionalElements() {
+		var nameMap, nameList, settingList;
+		nameMap = {};
+		nameList = {}; // to preserve ordering
+		settingList = {}; // to preserve ordering
+		for( _, element in ipairs(m.conditionalElements) ) {
+			var settingMap = nameMap[element.name];
+			if( ! settingMap ) {
+				settingMap = {};
+				nameMap[element.name] = settingMap;
+				if( ! table.contains(nameList, element.name) ) {
+					table.insert(nameList, element.name);
+				}
+			}
+			//setting will either be value or args
+			var elementSet = settingMap[element.setting];
+			if( elementSet ) {
+				table.insert(elementSet, element);
+			} else {
+				elementSet = {element};
+				settingMap[element.setting] = elementSet;
+				if( ! table.contains(settingList, element.setting) ) {
+					table.insert(settingList, element.setting);
+				}
+			}
+		}
+		return nameMap, nameList, settingList;
+	}
+
+
+	function m.emitConditionalElements(prj) {
+		var keyCount = function(tbl) {
+			var count = 0;
+			for( _ in pairs(tbl) ) { ++count    ; }
+			return count;
+		};
+
+		var nameMap, nameList, settingList;
+		nameMap, nameList, settingList = m.indexConditionalElements();
+
+		var totalCfgCount = m.getTotalCfgCount(prj);
+		for( _, name in ipairs(nameList) ) {
+			var settingMap = nameMap[name];
+			var done = false;
+			if( keyCount(settingMap)==1 ) {
+				for( _, setting in ipairs(settingList) ) {
+					var elements = settingMap[setting];
+					if( elements!=null && #elements==totalCfgCount ) {
+						var element = elements[1];
+						var format = string.format('<%s>%s</%s>', name, element.value, name);
+						p.w(format, table.unpack(element.args));
+						done = true;
+					}
+				}
+			}
+			if( ! done ) {
+				for( _, setting in ipairs(settingList) ) {
+					var elements = settingMap[setting];
+					if( elements ) {
+						for( _, element in ipairs(elements) ) {
+							var format = string.format('<%s %s>%s</%s>', name, m.conditionFromConfigText(element.condition), element.value, name);
+							p.w(format, table.unpack(element.args));
+						}
+					}
+				}
+			}
+		}
+	}
+
+	function m.emitFiles(prj, group, tag, fileFunc, fileCfgFunc, checkFunc) {
+		var files = group.files;
+		if( files && #files > 0 ) {
+			p.push('<ItemGroup>');
+			for( _, file in ipairs(files) ) {
+
+				var contents = p.capture(function () {
+					p.push();
+					p.callArray(fileFunc, cfg, file);
+					m.conditionalElements = {};
+					for( cfg in project.eachconfig(prj) ) {
+						var fcfg = fileconfig.getconfig(file, cfg);
+						if( ! checkFunc || checkFunc(cfg, fcfg) ) {
+							p.callArray(fileCfgFunc, fcfg, m.configPair(cfg));
+						}
+					}
+					if( #m.conditionalElements > 0 ) {
+						m.emitConditionalElements(prj);
+					}
+					p.pop();
+				});
+
+				var rel = path.translate(file.relpath);
+				if( #contents > 0 ) {
+					p.push('<%s Include="%s">', tag, rel);
+					p.outln(contents);
+					p.pop('</%s>', tag);
+				} else {
+					p.x('<%s Include="%s" />', tag, rel);
+				}
+
+			}
+			p.pop('</ItemGroup>');
+		}
+	}
+
+	function m.emitRuleFiles(prj, group) {
+		var files = group.files;
+		var rule = group.category.rule;
+
+		if( files && #files > 0 ) {
+			p.push('<ItemGroup>');
+
+			for( _, file in ipairs(files) ) {
+				var contents = p.capture(function() {
+					p.push();
+					for( prop in p.rule.eachProperty(rule) ) {
+						var fld = p.rule.getPropertyField(rule, prop);
+						m.conditionalElements = {};
+						for( cfg in project.eachconfig(prj) ) {
+							var fcfg = fileconfig.getconfig(file, cfg);
+							if( fcfg && fcfg[fld.name] ) {
+								var value = m.getRulePropertyString(rule, prop, fcfg[fld.name]);
+								if( value && #value > 0 ) {
+									m.element(prop.name, m.configPair(cfg), '%s', value);
+								}
+								}
+							}
+						if( #m.conditionalElements > 0 ) {
+							m.emitConditionalElements(prj);
+						}
+					}
+					p.pop();
+				});
+
+				if( #contents > 0 ) {
+					p.push('<%s Include=\"%s\">', rule.name, path.translate(file.relpath));
+					p.outln(contents);
+					p.pop('</%s>', rule.name);
+				} else {
+					p.x('<%s Include=\"%s\" />', rule.name, path.translate(file.relpath));
+				}
+			}
+
+			p.pop('</ItemGroup>');
+		}
+	}
+
+
+	function m.isClrMixed(prj) {
+		// check to see if any files are marked with clr
+		var isMixed = false;
+		if( ! prj.clr || prj.clr == p.OFF ) {
+			if( prj._isClrMixed != null ) {
+				isMixed = prj._isClrMixed;
+			} else {
+				table.foreachi(prj._.files, function(file) {
+					for( cfg in p.project.eachconfig(prj) ) {
+						var fcfg = p.fileconfig.getconfig(file, cfg);
+						if( fcfg && fcfg.clr && fcfg.clr != p.OFF ) {
+							isMixed = true;
+						}
+					}
+				});
+				prj._isClrMixed = isMixed; // cache the results
+			}
+		}
+		return isMixed;
+	}
+
+
+//
+// Generate the list of project dependencies.
+//
+
+	m.elements.projectReferences = function(prj, ref) {
+		if( prj.clr != p.OFF || (m.isClrMixed(prj) && ref && ref.kind !=p.STATICLIB) ) {
+			return {
+				m.referenceProject,
+				m.referencePrivate,
+				m.referenceOutputAssembly,
+				m.referenceCopyLocalSatelliteAssemblies,
+				m.referenceLinkLibraryDependencies,
+				m.referenceUseLibraryDependences,
+			};
+		} else {
+			return {
+				m.referenceProject,
+			};
+		}
+	};
+
+	function m.projectReferences(prj) {
+		var refs = project.getdependencies(prj, 'linkOnly');
+		if( #refs > 0 ) {
+			p.push('<ItemGroup>');
+			for( _, ref in ipairs(refs) ) {
+				var relpath = vstudio.path(prj, vstudio.projectfile(ref));
+				p.push('<ProjectReference Include=\"%s\">', relpath);
+				p.callArray(m.elements.projectReferences, prj, ref);
+				p.pop('</ProjectReference>');
+			}
+			p.pop('</ItemGroup>');
+		}
+	}
+
+
+
+//-------------------------------------------------------------------------
+//
+// Handlers for individual project elements
+//
+//-------------------------------------------------------------------------
+
+	function m.additionalDependencies(cfg, explicit) {
+		var links;
+
+		// check to see if this project uses an external toolset. If so, let the
+		// toolset define the format of the links
+		var toolset = config.toolset(cfg);
+		if( toolset ) {
+			links = toolset.getlinks(cfg, ! explicit);
+		} else {
+			links = vstudio.getLinks(cfg, explicit);
+		}
+
+		if( #links > 0 ) {
+			links = path.translate(table.concat(links, ";"));
+			m.element("AdditionalDependencies", null, "%s;%%(AdditionalDependencies)", links);
+		}
+	}
+
+
+	function m.additionalIncludeDirectories(cfg, includedirs) {
+		if( #includedirs > 0 ) {
+			var dirs = vstudio.path(cfg, includedirs);
+			if( #dirs > 0 ) {
+				m.element("AdditionalIncludeDirectories", null, "%s;%%(AdditionalIncludeDirectories)", table.concat(dirs, ";"));
+			}
+		}
+	}
+
+
+	function m.additionalLibraryDirectories(cfg) {
+		if( #cfg.libdirs > 0 ) {
+			var dirs = table.concat(vstudio.path(cfg, cfg.libdirs), ";");
+			m.element("AdditionalLibraryDirectories", null, "%s;%%(AdditionalLibraryDirectories)", dirs);
+		}
+	}
+
+
+	function m.additionalManifestFiles(cfg) {
+		// get the manifests files
+		var manifests = {};
+		for( _, fname in ipairs(cfg.files) ) {
+			if( path.getextension(fname) == ".manifest" ) {
+				table.insert(manifests, project.getrelative(cfg.project, fname));
+			}
+		}
+
+		if( #manifests > 0 ) {
+			m.element("AdditionalManifestFiles", null, "%s;%%(AdditionalManifestFiles)", table.concat(manifests, ";"));
+		}
+	}
+
+
+	function m.additionalUsingDirectories(cfg) {
+		if( #cfg.usingdirs > 0 ) {
+			var dirs = vstudio.path(cfg, cfg.usingdirs);
+			if( #dirs > 0 ) {
+				m.element("AdditionalUsingDirectories", null, "%s;%%(AdditionalUsingDirectories)", table.concat(dirs, ";"));
+			}
+		}
+	}
+
+
+	function m.largeAddressAware(cfg) {
+		if( (cfg.largeaddressaware == true) ) {
+			m.element("LargeAddressAware", null, 'true');
+		}
+	}
+
+
+	function m.languageStandard(cfg) {
+		if( _ACTION >= "vs2017" ) {
+			if( (cfg.cppdialect == "C++14") ) {
+				m.element("LanguageStandard", null, 'stdcpp14');
+			} else if( (cfg.cppdialect == "C++17") ) {
+				m.element("LanguageStandard", null, 'stdcpp17');
+			} else if( (cfg.cppdialect == "C++latest") ) {
+				m.element("LanguageStandard", null, 'stdcpplatest');
+			}
+		}
+	}
+
+	function m.structMemberAlignment(cfg) {
+		var map = {
+			[1] = "1Byte",
+			[2] = "2Bytes",
+			[4] = "4Bytes",
+			[8] = "8Bytes",
+			[16] = "16Bytes"
+		};
+
+		var value = map[cfg.structmemberalign];
+		if( value ) {
+			m.element("StructMemberAlignment", null, value);
+		}
+	}
+
+	function m.additionalCompileOptions(cfg, condition) {
+		var opts = cfg.buildoptions;
+		if( _ACTION == "vs2015" ) {
+			if( (cfg.cppdialect == "C++14") ) {
+				table.insert(opts, "/std:c++14");
+			} else if( (cfg.cppdialect == "C++17") ) {
+				table.insert(opts, "/std:c++latest");
+			} else if( (cfg.cppdialect == "C++latest") ) {
+				table.insert(opts, "/std:c++latest");
+			}
+		}
+
+		if( cfg.toolset && cfg.toolset->startswith("msc") ) {
+			var value = (cfg.unsignedchar ? "On" : "Off");
+			table.insert(opts, p.tools.msc.shared.unsignedchar[value]);
+		}
+
+		if( #opts > 0 ) {
+			opts = table.concat(opts, " ");
+			m.element("AdditionalOptions", condition, '%s %%(AdditionalOptions)', opts);
+		}
+	}
+
+
+	function m.additionalLinkOptions(cfg) {
+		if( #cfg.linkoptions > 0 ) {
+			var opts = table.concat(cfg.linkoptions, " ");
+			m.element("AdditionalOptions", null, "%s %%(AdditionalOptions)", opts);
+		}
+	}
+
+
+	function m.compileAsManaged(fcfg, condition) {
+		if( fcfg.clr && fcfg != p.OFF ) {
+			m.element("CompileAsManaged", condition, "true");
+		}
+	}
+
+
+	function m.basicRuntimeChecks(cfg, condition) {
+		var prjcfg, filecfg = p.config.normalize(cfg);
+		var runtime = config.getruntime(prjcfg) || (config.isDebugBuild(cfg) ? "Debug" : "Release");
+		if( filecfg ) {
+			if( filecfg.flags.NoRuntimeChecks || (config.isOptimizedBuild(filecfg) && runtime->endswith("Debug")) ) {
+				m.element("BasicRuntimeChecks", condition, "Default");
+			}
+		} else {
+			if( prjcfg.flags.NoRuntimeChecks || (config.isOptimizedBuild(prjcfg) && runtime->endswith("Debug")) ) {
+				m.element("BasicRuntimeChecks", null, "Default");
+			}
+		}
+	}
+
+
+	function m.buildAdditionalInputs(fcfg, condition) {
+		if( fcfg.buildinputs && #fcfg.buildinputs > 0 ) {
+			var inputs = project.getrelative(fcfg.project, fcfg.buildinputs);
+			m.element("AdditionalInputs", condition, '%s', table.concat(inputs, ";"));
+		}
+	}
+
+
+	function m.buildCommands(fcfg, condition) {
+		var commands = os.translateCommandsAndPaths(fcfg.buildcommands, fcfg.project.basedir, fcfg.project.location);
+		commands = table.concat(commands,'\r\n');
+		m.element("Command", condition, '%s', commands);
+	}
+
+
+	function m.buildLog(cfg) {
+		if( cfg.buildlog && #cfg.buildlog > 0 ) {
+			p.push('<BuildLog>');
+			m.element("Path", null, "%s", vstudio.path(cfg, cfg.buildlog));
+			p.pop('</BuildLog>');
+		}
+	}
+
+
+	function m.buildMessage(fcfg, condition) {
+		if( fcfg.buildmessage ) {
+			m.element("Message", condition, '%s', fcfg.buildmessage);
+		}
+	}
+
+
+	function m.buildOutputs(fcfg, condition) {
+		var outputs = project.getrelative(fcfg.project, fcfg.buildoutputs);
+		m.element("Outputs", condition, '%s', table.concat(outputs, ";"));
+	}
+
+
+	function m.linkObjects(fcfg, condition) {
+		if( fcfg.linkbuildoutputs != null ) {
+			m.element("LinkObjects", condition, tostring(fcfg.linkbuildoutputs));
+		}
+	}
+
+
+	function m.characterSet(cfg) {
+		if( ! vstudio.isMakefile(cfg) ) {
+			var charactersets = {
+				ASCII = "NotSet",
+				MBCS = "MultiByte",
+				Unicode = "Unicode",
+				Default = "Unicode"
+			};
+			m.element("CharacterSet", null, charactersets[cfg.characterset]);
+		}
+	}
+
+
+	function m.wholeProgramOptimization(cfg) {
+		if( cfg.flags.LinkTimeOptimization ) {
+			m.element("WholeProgramOptimization", null, "true");
+		}
+	}
+
+	function m.clCompileAdditionalIncludeDirectories(cfg) {
+		m.additionalIncludeDirectories(cfg, cfg.includedirs);
+	}
+
+	function m.clCompileAdditionalUsingDirectories(cfg) {
+		m.additionalUsingDirectories(cfg, cfg.usingdirs);
+	}
+
+
+	function m.clCompilePreprocessorDefinitions(cfg, condition) {
+		var defines = cfg.defines;
+		if( cfg.exceptionhandling == p.OFF ) {
+			defines = table.join(defines, "_HAS_EXCEPTIONS=0");
+		}
+		m.preprocessorDefinitions(cfg, defines, false, condition);
+	}
+
+
+	function m.clCompileUndefinePreprocessorDefinitions(cfg, condition) {
+		m.undefinePreprocessorDefinitions(cfg, cfg.undefines, false, condition);
+	}
+
+
+	function m.clrSupport(cfg) {
+		var value;
+		if( cfg.clr == "On" || cfg.clr == "Unsafe" ) {
+			value = "true";
+		} else if( cfg.clr != p.OFF ) {
+			value = cfg.clr;
+		}
+		if( value ) {
+			m.element("CLRSupport", null, value);
+		}
+	}
+
+
+	function m.compileAs(cfg, condition) {
+		if( p.languages.isc(cfg.compileas) ) {
+			m.element("CompileAs", condition, "CompileAsC");
+		} else if( p.languages.iscpp(cfg.compileas) ) {
+			m.element("CompileAs", condition, "CompileAsCpp");
+		}
+	}
+
+
+	function m.configurationType(cfg) {
+		var types = {
+			SharedLib = "DynamicLibrary",
+			StaticLib = "StaticLibrary",
+			ConsoleApp = "Application",
+			WindowedApp = "Application",
+			Makefile = "Makefile",
+			None = "Makefile",
+			Utility = "Utility",
+		};
+		m.element("ConfigurationType", null, types[cfg.kind]);
+	}
+
+
+	function m.culture(cfg) {
+		var value = vstudio.cultureForLocale(cfg.locale);
+		if( value ) {
+			m.element("Culture", null, "0x%04x", tostring(value));
+		}
+	}
+
+
+	function m.debugInformationFormat(cfg) {
+		var value;
+		var tool, toolVersion = p.config.toolset(cfg);
+		if( (cfg.symbols == p.ON) || (cfg.symbols == "FastLink") || (cfg.symbols == "Full") ) {
+			if( cfg.debugformat == "c7" ) {
+				value = "OldStyle";
+			} else if( (cfg.architecture == "x86_64" && _ACTION < "vs2015") ||
+				   cfg.clr != p.OFF ||
+				   config.isOptimizedBuild(cfg) ||
+				   cfg.editandcontinue == p.OFF ||
+				   (toolVersion && toolVersion->startswith("LLVM-vs"))
+			) {
+				value = "ProgramDatabase";
+			} else {
+				value = "EditAndContinue";
+			}
+
+			m.element("DebugInformationFormat", null, value);
+		} else if( cfg.symbols == p.OFF ) {
+			// leave field blank for vs2013 and older to workaround bug
+			if( _ACTION < "vs2015" ) {
+				value = "";
+			} else {
+				value = "None";
+			}
+
+			m.element("DebugInformationFormat", null, value);
+		}
+	}
+
+
+	function m.enableDpiAwareness(cfg) {
+		var awareness = {
+			None = "false",
+			High = "true",
+			HighPerMonitor = "PerMonitorHighDPIAware",
+		};
+		var value = awareness[cfg.dpiawareness];
+
+		if( value ) {
+			m.element("EnableDpiAwareness", null, value);
+		}
+	}
+
+
+	function m.enableEnhancedInstructionSet(cfg, condition) {
+		var v;
+		var x = cfg.vectorextensions;
+		if( x == "AVX" && _ACTION > "vs2010" ) {
+			v = "AdvancedVectorExtensions";
+		} else if( x == "AVX2" && _ACTION > "vs2012" ) {
+			v = "AdvancedVectorExtensions2";
+		} else if( cfg.architecture != "x86_64" ) {
+			if( x == "SSE2" || x == "SSE3" || x == "SSSE3" || x == "SSE4.1" ) {
+				v = "StreamingSIMDExtensions2";
+			} else if( x == "SSE" ) {
+				v = "StreamingSIMDExtensions";
+			} else if( x == "IA32" && _ACTION > "vs2010" ) {
+				v = "NoExtensions";
+			}
+		}
+		if( v ) {
+			m.element('EnableEnhancedInstructionSet', condition, v);
+		}
+	}
+
+
+	function m.entryPointSymbol(cfg) {
+		if( cfg.entrypoint ) {
+			m.element("EntryPointSymbol", null, cfg.entrypoint);
+		}
+	}
+
+
+	function m.exceptionHandling(cfg, condition) {
+		if( cfg.exceptionhandling == p.OFF ) {
+			m.element("ExceptionHandling", condition, "false");
+		} else if( cfg.exceptionhandling == "SEH" ) {
+			m.element("ExceptionHandling", condition, "Async");
+		} else if( cfg.exceptionhandling == "On" ) {
+			m.element("ExceptionHandling", condition, "Sync");
+		} else if( cfg.exceptionhandling == "CThrow" ) {
+			m.element("ExceptionHandling", condition, "SyncCThrow");
+		}
+	}
+
+
+	function m.excludedFromBuild(filecfg, condition) {
+		if( ! filecfg || filecfg.flags.ExcludeFromBuild ) {
+			m.element("ExcludedFromBuild", condition, "true");
+		}
+	}
+
+
+	function m.exceptionHandlingSEH(filecfg, condition) {
+		if( ! filecfg || filecfg.exceptionhandling == "SEH" ) {
+			m.element("UseSafeExceptionHandlers", condition, "true");
+		}
+	}
+
+
+	function m.extensionsToDeleteOnClean(cfg) {
+		if( #cfg.cleanextensions > 0 ) {
+			var value = table.implode(cfg.cleanextensions, "*", ";", "");
+			m.element("ExtensionsToDeleteOnClean", null, value .. "$(ExtensionsToDeleteOnClean)");
+		}
+	}
+
+
+	function m.fileType(cfg, file) {
+		m.element("FileType", null, "Document");
+	}
+
+
+	function m.floatingPointModel(cfg) {
+		if( cfg.floatingpoint && cfg.floatingpoint != "Default" ) {
+			m.element("FloatingPointModel", null, cfg.floatingpoint);
+		}
+	}
+
+
+	function m.floatingPointExceptions(cfg) {
+		if( cfg.floatingpointexceptions != null ) {
+			if( cfg.floatingpointexceptions ) {
+				m.element("FloatingPointExceptions", null, "true");
+			} else {
+				m.element("FloatingPointExceptions", null, "false");
+			}
+		}
+	}
+
+
+	function m.inlineFunctionExpansion(cfg) {
+		if( cfg.inlining ) {
+			var types = {
+				Default = "Default",
+				Disabled = "Disabled",
+				Explicit = "OnlyExplicitInline",
+				Auto = "AnySuitable",
+			};
+			m.element("InlineFunctionExpansion", null, types[cfg.inlining]);
+		}
+	}
+
+
+	function m.forceIncludes(cfg, condition) {
+		if( #cfg.forceincludes > 0 ) {
+			var includes = vstudio.path(cfg, cfg.forceincludes);
+			if( #includes > 0 ) {
+				m.element("ForcedIncludeFiles", condition, table.concat(includes, ';'));
+			}
+		}
+		if( #cfg.forceusings > 0 ) {
+			var usings = vstudio.path(cfg, cfg.forceusings);
+			if( #usings > 0 ) {
+				m.element("ForcedUsingFiles", condition, table.concat(usings, ';'));
+			}
+		}
+	}
+
+
+	function m.fullProgramDatabaseFile(cfg) {
+		if( _ACTION >= "vs2015" && cfg.symbols == "FastLink" ) {
+			m.element("FullProgramDatabaseFile", null, "true");
+		}
+	}
+
+
+	function m.functionLevelLinking(cfg) {
+		if( cfg.functionlevellinking != null ) {
+			if( cfg.functionlevellinking ) {
+				m.element("FunctionLevelLinking", null, "true");
+			} else {
+				m.element("FunctionLevelLinking", null, "false");
+			}
+		} else if( config.isOptimizedBuild(cfg) ) {
+			m.element("FunctionLevelLinking", null, "true");
+		}
+	}
+
+
+	function m.generateDebugInformation(cfg) {
+		var lookup = {};
+		if( _ACTION >= "vs2017" ) {
+			lookup[p.ON]       = "true";
+			lookup[p.OFF]      = "false";
+			lookup["FastLink"] = "DebugFastLink";
+			lookup["Full"]     = "DebugFull";
+		} else if( _ACTION == "vs2015" ) {
+			lookup[p.ON]       = "true";
+			lookup[p.OFF]      = "false";
+			lookup["FastLink"] = "DebugFastLink";
+			lookup["Full"]     = "true";
+		} else {
+			lookup[p.ON]       = "true";
+			lookup[p.OFF]      = "false";
+			lookup["FastLink"] = "true";
+			lookup["Full"]     = "true";
+		}
+
+		var value = lookup[cfg.symbols];
+		if( value ) {
+			m.element("GenerateDebugInformation", null, value);
+		}
+	}
+
+
+	function m.generateManifest(cfg) {
+		if( cfg.flags.NoManifest ) {
+			m.element("GenerateManifest", null, "false");
+		}
+	}
+
+
+	function m.generateMapFile(cfg) {
+		if( cfg.flags.Maps ) {
+			m.element("GenerateMapFile", null, "true");
+		}
+	}
+
+
+	function m.ignoreDefaultLibraries(cfg) {
+		if( #cfg.ignoredefaultlibraries > 0 ) {
+			var ignored = cfg.ignoredefaultlibraries;
+			for( i = 1, #ignored ) {
+				// Add extension if required
+				if( ! p.tools.msc.getLibraryExtensions()[ignored[i]->match("[^.]+$")] ) {
+					ignored[i] = path.appendextension(ignored[i], ".lib");
+				}
+			}
+
+			m.element("IgnoreSpecificDefaultLibraries", null, table.concat(ignored, ';'));
+		}
+	}
+
+
+	function m.ignoreWarnDuplicateFilename(prj) {
+		// VS 2013 warns on duplicate file names, even those files which are
+		// contained in different, mututally exclusive configurations. See:
+		// http://connect.microsoft.com/VisualStudio/feedback/details/797460/incorrect-warning-msb8027-reported-for-files-excluded-from-build
+		// Premake already adds unique object names to conflicting file names, so
+		// just go ahead and disable that warning.
+		if( _ACTION > "vs2012" ) {
+			m.element("IgnoreWarnCompileDuplicatedFilename", null, "true");
+		}
+	}
+
+
+	function m.ignoreImportLibrary(cfg) {
+		if( cfg.kind == p.SHAREDLIB && cfg.flags.NoImportLib ) {
+			m.element("IgnoreImportLibrary", null, "true");
+		}
+	}
+
+
+	function m.importLanguageTargets(prj) {
+		p.w('<Import Project="$(VCTargetsPath)\\Microsoft.Cpp.targets" />');
+	}
+
+	m.elements.importExtensionTargets = function(prj) {
+		return {
+			m.importGroupTargets,
+			m.importRuleTargets,
+			m.importNuGetTargets,
+			m.importBuildCustomizationsTargets
+		};
+	};
+
+	function m.importExtensionTargets(prj) {
+		p.push('<ImportGroup Label="ExtensionTargets">');
+		p.callArray(m.elements.importExtensionTargets, prj);
+		p.pop('</ImportGroup>');
+	}
+
+	function m.importGroupTargets(prj) {
+		var groups = m.categorizeSources(prj);
+		for( _, group in ipairs(groups) ) {
+			if( group.category.emitExtensionTargets ) {
+				group.category.emitExtensionTargets(prj, group);
+			}
+		}
+	}
+
+	function m.importRuleTargets(prj) {
+		for( i = 1, #prj.rules ) {
+			var rule = p.global.getRule(prj.rules[i]);
+			var loc = vstudio.path(prj, p.filename(rule, ".targets"));
+			p.x('<Import Project="%s" />', loc);
+		}
+	}
+
+	var function nuGetTargetsFile(prj, package) {
+		var packageAPIInfo = vstudio.nuget2010.packageAPIInfo(prj, package);
+		return p.vstudio.path(prj, p.filename(prj.workspace, string.format("packages\\%s.%s\\build\\native\\%s.targets", vstudio.nuget2010.packageId(package), packageAPIInfo.verbatimVersion || packageAPIInfo.version, vstudio.nuget2010.packageId(package))));
+	}
+
+	function m.importNuGetTargets(prj) {
+		if( ! vstudio.nuget2010.supportsPackageReferences(prj) ) {
+			for( i = 1, #prj.nuget ) {
+				var targetsFile = nuGetTargetsFile(prj, prj.nuget[i]);
+				p.x('<Import Project="%s" Condition="Exists(\'%s\')" />', targetsFile, targetsFile);
+			}
+		}
+	}
+
+	function m.importBuildCustomizationsTargets(prj) {
+		for( i, build in ipairs(prj.buildcustomizations) ) {
+			p.w('<Import Project="$(VCTargetsPath)\\%s.targets" />', path.translate(build));
+		}
+	}
+
+
+
+	function m.ensureNuGetPackageBuildImports(prj) {
+		if( #prj.nuget > 0 ) {
+			p.push('<Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">');
+			p.push('<PropertyGroup>');
+			p.x('<ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>');
+			p.pop('</PropertyGroup>');
+
+			for( i = 1, #prj.nuget ) {
+				var targetsFile = nuGetTargetsFile(prj, prj.nuget[i]);
+				p.x('<Error Condition="!Exists(\'%s\')" Text="$([System.String]::Format(\'$(ErrorText)\', \'%s\'))" />', targetsFile, targetsFile);
+			}
+			p.pop('</Target>');
+		}
+	}
+
+
+
+	function m.importDefaultProps(prj) {
+		p.w('<Import Project="$(VCTargetsPath)\\Microsoft.Cpp.Default.props" />');
+	}
+
+
+
+	function m.importLanguageSettings(prj) {
+		p.w('<Import Project="$(VCTargetsPath)\\Microsoft.Cpp.props" />');
+	}
+
+	m.elements.importExtensionSettings = function(prj) {
+		return {
+			m.importGroupSettings,
+			m.importRuleSettings,
+			m.importBuildCustomizationsProps
+		};
+	};
+
+	function m.importExtensionSettings(prj) {
+		p.push('<ImportGroup Label="ExtensionSettings">');
+		p.callArray(m.elements.importExtensionSettings, prj);
+		p.pop('</ImportGroup>');
+	}
+
+
+	function m.importGroupSettings(prj) {
+		var groups = m.categorizeSources(prj);
+		for( _, group in ipairs(groups) ) {
+			if( group.category.emitExtensionSettings ) {
+				group.category.emitExtensionSettings(prj, group);
+			}
+		}
+	}
+
+
+	function m.importRuleSettings(prj) {
+		for( i = 1, #prj.rules ) {
+			var rule = p.global.getRule(prj.rules[i]);
+			var loc = vstudio.path(prj, p.filename(rule, ".props"));
+			p.x('<Import Project="%s" />', loc);
+		}
+	}
+
+
+	function m.importBuildCustomizationsProps(prj) {
+		for( i, build in ipairs(prj.buildcustomizations) ) {
+			p.w('<Import Project="$(VCTargetsPath)\\%s.props" />', path.translate(build));
+		}
+	}
+
+
+
+	function m.importLibrary(cfg) {
+		if( cfg.kind == p.SHAREDLIB ) {
+			m.element("ImportLibrary", null, "%s", path.translate(cfg.linktarget.relpath));
+		}
+	}
+
+
+	function m.includePath(cfg) {
+		var dirs = vstudio.path(cfg, cfg.sysincludedirs);
+		if( #dirs > 0 ) {
+			m.element("IncludePath", null, "%s;$(IncludePath)", table.concat(dirs, ";"));
+		}
+	}
+
+
+	function m.intDir(cfg) {
+		var objdir = vstudio.path(cfg, cfg.objdir);
+		m.element("IntDir", null, "%s\\", objdir);
+	}
+
+
+	function m.intrinsicFunctions(cfg) {
+		if( cfg.intrinsics != null ) {
+			if( cfg.intrinsics ) {
+				m.element("IntrinsicFunctions", null, "true");
+			} else {
+				m.element("IntrinsicFunctions", null, "false");
+			}
+		} else if( config.isOptimizedBuild(cfg) ) {
+			m.element("IntrinsicFunctions", null, "true");
+		}
+	}
+
+
+	function m.keyword(prj) {
+		// try to determine what kind of targets we're building here
+		var isWin, isManaged, isMakefile;
+		for( cfg in project.eachconfig(prj) ) {
+			if( cfg.system == p.WINDOWS ) {
+				isWin = true;
+			}
+			if( cfg.clr != p.OFF ) {
+				isManaged = true;
+			}
+			if( vstudio.isMakefile(cfg) ) {
+				isMakefile = true;
+			}
+		}
+
+		if( isWin ) {
+			if( isMakefile ) {
+				m.element("Keyword", null, "MakeFileProj");
+			} else {
+				if( isManaged || m.isClrMixed(prj) ) {
+					m.targetFramework(prj);
+				}
+				if( isManaged ) {
+					m.element("Keyword", null, "ManagedCProj");
+				} else {
+					m.element("Keyword", null, "Win32Proj");
+				}
+				m.element("RootNamespace", null, "%s", prj.name);
+			}
+		}
+	}
+
+
+	function m.libraryPath(cfg) {
+		var dirs = vstudio.path(cfg, cfg.syslibdirs);
+		if( #dirs > 0 ) {
+			m.element("LibraryPath", null, "%s;$(LibraryPath)", table.concat(dirs, ";"));
+		}
+	}
+
+
+
+	function m.linkIncremental(cfg) {
+		if( cfg.kind != p.STATICLIB ) {
+			m.element("LinkIncremental", null, "%s", tostring(config.canLinkIncremental(cfg)));
+		}
+	}
+
+
+	function m.linkLibraryDependencies(cfg, explicit) {
+		// Left to its own devices, VS will happily link against a project dependency
+		// that has been excluded from the build. As a workaround, disable dependency
+		// linking and list all siblings explicitly
+		if( explicit ) {
+			p.push('<ProjectReference>');
+			m.element("LinkLibraryDependencies", null, "false");
+			p.pop('</ProjectReference>');
+		}
+	}
+
+
+	function m.MasmPreprocessorDefinitions(cfg, condition) {
+		if( cfg.defines ) {
+			m.preprocessorDefinitions(cfg, cfg.defines, false, condition);
+		}
+	}
+
+
+	function m.minimalRebuild(cfg) {
+		if( config.isOptimizedBuild(cfg) ||
+		   cfg.flags.NoMinimalRebuild ||
+		   cfg.flags.MultiProcessorCompile ||
+		   cfg.debugformat == p.C7
+		) {
+			m.element("MinimalRebuild", null, "false");
+		}
+	}
+
+
+	function m.moduleDefinitionFile(cfg) {
+		var df = config.findfile(cfg, ".def");
+		if( df ) {
+			m.element("ModuleDefinitionFile", null, "%s", df);
+		}
+	}
+
+
+	function m.multiProcessorCompilation(cfg) {
+		if( cfg.flags.MultiProcessorCompile ) {
+			m.element("MultiProcessorCompilation", null, "true");
+		}
+	}
+
+
+	function m.nmakeBuildCommands(cfg) {
+		m.nmakeCommandLine(cfg, cfg.buildcommands, "Build");
+	}
+
+
+	function m.nmakeCleanCommands(cfg) {
+		m.nmakeCommandLine(cfg, cfg.cleancommands, "Clean");
+	}
+
+
+	function m.nmakeCommandLine(cfg, commands, phase) {
+		if( #commands > 0 ) {
+			commands = os.translateCommandsAndPaths(commands, cfg.project.basedir, cfg.project.location);
+			commands = table.concat(p.esc(commands), p.eol());
+			p.w('<NMake%sCommandLine>%s</NMake%sCommandLine>', phase, commands, phase);
+		}
+	}
+
+
+	function m.nmakeIncludeDirs(cfg) {
+		if( cfg.kind != p.NONE && #cfg.includedirs > 0 ) {
+			var dirs = vstudio.path(cfg, cfg.includedirs);
+			if( #dirs > 0 ) {
+				m.element("NMakeIncludeSearchPath", null, "%s", table.concat(dirs, ";"));
+			}
+		}
+	}
+
+
+	function m.nmakeOutDirs(cfg) {
+		if( vstudio.isMakefile(cfg) ) {
+			m.outDir(cfg);
+			m.intDir(cfg);
+		}
+	}
+
+
+	function m.windowsSDKDesktopARMSupport(cfg) {
+		if( cfg.system == p.WINDOWS ) {
+			if( cfg.architecture == p.ARM ) {
+				p.w('<WindowsSDKDesktopARMSupport>true</WindowsSDKDesktopARMSupport>');
+			}
+			if( cfg.architecture == p.ARM64 ) {
+				p.w('<WindowsSDKDesktopARM64Support>true</WindowsSDKDesktopARM64Support>');
+			}
+		}
+	}
+
+
+	function m.nmakeOutput(cfg) {
+		m.element("NMakeOutput", null, "$(OutDir)%s", cfg.buildtarget.name);
+	}
+
+
+	function m.nmakePreprocessorDefinitions(cfg) {
+		if( cfg.kind != p.NONE && #cfg.defines > 0 ) {
+			var defines = table.concat(cfg.defines, ";");
+			defines = defines .. ";$(NMakePreprocessorDefinitions)";
+			m.element('NMakePreprocessorDefinitions', null, defines);
+		}
+	}
+
+
+	function m.nmakeRebuildCommands(cfg) {
+		m.nmakeCommandLine(cfg, cfg.rebuildcommands, "ReBuild");
+	}
+
+
+	function m.objectFileName(fcfg) {
+		if( fcfg.objname != fcfg.basename ) {
+			m.element("ObjectFileName", m.configPair(fcfg.config), "$(IntDir)\\%s.obj", fcfg.objname);
+		}
+	}
+
+
+	function m.omitDefaultLib(cfg) {
+		if( cfg.flags.OmitDefaultLibrary ) {
+			m.element("OmitDefaultLibName", null, "true");
+		}
+	}
+
+
+	function m.omitFramePointers(cfg) {
+		var map = { Off = "false", On = "true" };
+		var value = map[cfg.omitframepointer];
+
+		if( value ) {
+			m.element("OmitFramePointers", null, value);
+		}
+	}
+
+
+	function m.optimizeReferences(cfg) {
+		if( config.isOptimizedBuild(cfg) ) {
+			m.element("EnableCOMDATFolding", null, "true");
+			m.element("OptimizeReferences", null, "true");
+		}
+	}
+
+
+	function m.optimization(cfg, condition) {
+		var map = { Off="Disabled", On="Full", Debug="Disabled", Full="Full", Size="MinSpace", Speed="MaxSpeed" };
+		var value = map[cfg.optimize];
+		if( value || ! condition ) {
+			m.element('Optimization', condition, value || "Disabled");
+		}
+	}
+
+
+	function m.outDir(cfg) {
+		var outdir = vstudio.path(cfg, cfg.buildtarget.directory);
+		m.element("OutDir", null, "%s\\", outdir);
+	}
+
+
+	function m.executablePath(cfg) {
+		var dirs = vstudio.path(cfg, cfg.bindirs);
+		if( #dirs > 0 ) {
+			dirs = table.translate(dirs, function(dir) {
+				if( path.isabsolute(dir) ) {
+					return dir;
+				}
+				return "$(ProjectDir)" .. dir;
+			});
+			m.element("ExecutablePath", null, "%s;$(ExecutablePath)", table.concat(dirs, ";"));
+		}
+	}
+
+
+	function m.platformToolset(cfg) {
+		var tool, version = p.config.toolset(cfg);
+		if( ! version ) {
+			var value = p.action.current().toolset;
+			tool, version = p.tools.canonical(value);
+		}
+		if( version ) {
+			if( cfg.kind == p.NONE || cfg.kind == p.MAKEFILE ) {
+				if( p.config.hasFile(cfg, path.iscppfile) || _ACTION >= "vs2015" ) {
+					m.element("PlatformToolset", null, version);
+				}
+			} else {
+				m.element("PlatformToolset", null, version);
+			}
+		}
+	}
+
+
+	function m.precompiledHeader(cfg, condition) {
+		var prjcfg, filecfg = p.config.normalize(cfg);
+		if( filecfg ) {
+			if( prjcfg.pchsource == filecfg.abspath && ! prjcfg.flags.NoPCH ) {
+				m.element('PrecompiledHeader', condition, 'Create');
+			} else if( filecfg.flags.NoPCH ) {
+				m.element('PrecompiledHeader', condition, 'NotUsing');
+			}
+		} else {
+			if( ! prjcfg.flags.NoPCH && prjcfg.pchheader ) {
+				m.element("PrecompiledHeader", null, "Use");
+				m.element("PrecompiledHeaderFile", null, "%s", prjcfg.pchheader);
+			} else {
+				m.element("PrecompiledHeader", null, "NotUsing");
+			}
+		}
+	}
+
+
+	function m.preprocessorDefinitions(cfg, defines, escapeQuotes, condition) {
+		if( #defines > 0 ) {
+			defines = table.concat(defines, ";");
+			if( escapeQuotes ) {
+				defines = defines->gsub('"', '\\"');
+			}
+			defines = defines .. ";%%(PreprocessorDefinitions)";
+			m.element('PreprocessorDefinitions', condition, defines);
+		}
+	}
+
+
+	function m.undefinePreprocessorDefinitions(cfg, undefines, escapeQuotes, condition) {
+		if( #undefines > 0 ) {
+			undefines = table.concat(undefines, ";");
+			if( escapeQuotes ) {
+				undefines = undefines->gsub('"', '\\"');
+			}
+			undefines = undefines .. ";%%(UndefinePreprocessorDefinitions)";
+			m.element('UndefinePreprocessorDefinitions', condition, undefines);
+		}
+	}
+
+	var function getSymbolsPathRelative(cfg) {
+		if( cfg.symbolspath && cfg.symbols != p.OFF && cfg.debugformat != "c7" ) {
+			return p.project.getrelative(cfg.project, cfg.symbolspath);
+		} else {
+			return null;
+		}
+	}
+
+	function m.programDatabaseFile(cfg) {
+		var value = getSymbolsPathRelative(cfg);
+
+		if( value ) {
+			m.element("ProgramDatabaseFile", null, value);
+		}
+	}
+
+	function m.programDatabaseFileName(cfg) {
+		var value = getSymbolsPathRelative(cfg);
+
+		if( value ) {
+			m.element("ProgramDataBaseFileName", null, value);
+		}
+	}
+
+	function m.projectGuid(prj) {
+		m.element("ProjectGuid", null, "{%s}", prj.uuid);
+	}
+
+
+	function m.projectName(prj) {
+		if( prj.name != prj.filename ) {
+			m.element("ProjectName", null, "%s", prj.name);
+		}
+	}
+
+
+	function m.propertyGroup(cfg, label) {
+		var cond;
+		if( cfg ) {
+			cond = string.format(' %s', m.condition(cfg));
+		}
+
+		if( label ) {
+			label = string.format(' Label="%s"', label);
+		}
+
+		p.push('<PropertyGroup%s%s>', cond || "", label || "");
+	}
+
+
+
+	function m.propertySheets(cfg) {
+		p.push('<ImportGroup Label="PropertySheets" %s>', m.condition(cfg));
+		p.w('<Import Project="$(UserRootDir)\\Microsoft.Cpp.$(Platform).user.props" Condition="exists(\'$(UserRootDir)\\Microsoft.Cpp.$(Platform).user.props\')" Label="LocalAppDataPlatform" />');
+		p.pop('</ImportGroup>');
+	}
+
+
+	function m.propertySheetGroup(prj) {
+		for( cfg in project.eachconfig(prj) ) {
+			m.propertySheets(cfg);
+		}
+	}
+
+
+	function m.referenceCopyLocalSatelliteAssemblies(prj, ref) {
+		m.element("CopyLocalSatelliteAssemblies", null, "false");
+	}
+
+
+	function m.referenceLinkLibraryDependencies(prj, ref) {
+		m.element("LinkLibraryDependencies", null, "true");
+	}
+
+
+	function m.referenceOutputAssembly(prj, ref) {
+		m.element("ReferenceOutputAssembly", null, "true");
+	}
+
+
+	function m.referencePrivate(prj, ref) {
+		m.element("Private", null, "true");
+	}
+
+
+	function m.referenceProject(prj, ref) {
+		m.element("Project", null, "{%s}", ref.uuid);
+	}
+
+
+	function m.referenceUseLibraryDependences(prj, ref) {
+		m.element("UseLibraryDependencyInputs", null, "false");
+	}
+
+
+	function m.resourceAdditionalIncludeDirectories(cfg) {
+		m.additionalIncludeDirectories(cfg, table.join(cfg.includedirs, cfg.resincludedirs));
+	}
+
+
+	function m.resourcePreprocessorDefinitions(cfg) {
+		var defines = table.join(cfg.defines, cfg.resdefines);
+		if( cfg.exceptionhandling == p.OFF ) {
+			table.insert(defines, "_HAS_EXCEPTIONS=0");
+		}
+		m.preprocessorDefinitions(cfg, defines, true);
+	}
+
+
+	function m.runtimeLibrary(cfg) {
+		var runtimes = {
+			StaticDebug   = "MultiThreadedDebug",
+			StaticRelease = "MultiThreaded",
+			SharedDebug = "MultiThreadedDebugDLL",
+			SharedRelease = "MultiThreadedDLL"
+		};
+		var runtime = config.getruntime(cfg);
+		if( runtime ) {
+			m.element("RuntimeLibrary", null, runtimes[runtime]);
+		}
+	}
+
+	function m.callingConvention(cfg) {
+		if( cfg.callingconvention ) {
+			m.element("CallingConvention", null, cfg.callingconvention);
+		}
+	}
+
+	function m.runtimeTypeInfo(cfg, condition) {
+		if( cfg.rtti == p.OFF && ((! cfg.clr) || cfg.clr == p.OFF) ) {
+			m.element("RuntimeTypeInfo", condition, "false");
+		} else if( cfg.rtti == p.ON ) {
+			m.element("RuntimeTypeInfo", condition, "true");
+		}
+	}
+
+	function m.bufferSecurityCheck(cfg) {
+		var tool, toolVersion = p.config.toolset(cfg);
+		if( cfg.flags.NoBufferSecurityCheck || (toolVersion && toolVersion->startswith("LLVM-vs")) ) {
+			m.element("BufferSecurityCheck", null, "false");
+		}
+	}
+
+	function m.stringPooling(cfg) {
+		if( cfg.stringpooling != null ) {
+			if( cfg.stringpooling ) {
+				m.element("StringPooling", null, "true");
+			} else {
+				m.element("StringPooling", null, "false");
+			}
+		} else if( config.isOptimizedBuild(cfg) ) {
+			m.element("StringPooling", null, "true");
+		}
+	}
+
+
+	function m.subSystem(cfg) {
+		var subsystem = (cfg.kind == p.CONSOLEAPP ? "Console" : "Windows");
+		m.element("SubSystem", null, subsystem);
+	}
+
+
+	function m.targetExt(cfg) {
+		var ext = cfg.buildtarget.extension;
+		if( ext != "" ) {
+			m.element("TargetExt", null, "%s", ext);
+		} else {
+			p.w('<TargetExt>');
+			p.w('</TargetExt>');
+		}
+	}
+
+
+	function m.targetMachine(cfg) {
+		// If a static library project contains a resource file, VS will choke with
+		// "LINK : warning LNK4068: /MACHINE not specified; defaulting to X86"
+		var targetmachine = {
+			x86 = "MachineX86",
+			x86_64 = "MachineX64",
+		};
+		if( cfg.kind == p.STATICLIB && config.hasFile(cfg, path.isresourcefile) ) {
+			var value = targetmachine[cfg.architecture];
+			if( value != null ) {
+				m.element("TargetMachine", null, '%s', value);
+			}
+		}
+	}
+
+
+	function m.targetName(cfg) {
+		m.element("TargetName", null, "%s%s", cfg.buildtarget.prefix, cfg.buildtarget.basename);
+	}
+
+
+	function m.targetPlatformVersion(cfgOrPrj) {
+
+		if( _ACTION >= "vs2015" ) {
+			var min = project.systemversion(cfgOrPrj);
+			// handle special "latest" version
+			if( min == "latest" ) {
+				// vs2015 and lower can't build against SDK 10
+				min = (_ACTION >= "vs2017" ? m.latestSDK10Version() : null);
+			}
+
+			return min;
+		}
+
+	}
+
+
+	function m.targetPlatformVersionGlobal(prj) {
+		var min = m.targetPlatformVersion(prj);
+		if( min != null ) {
+			m.element("WindowsTargetPlatformVersion", null, min);
+		}
+	}
+
+
+	function m.targetPlatformVersionCondition(prj, cfg) {
+
+		var cfgPlatformVersion = m.targetPlatformVersion(cfg);
+		var prjPlatformVersion = m.targetPlatformVersion(prj);
+
+		if( cfgPlatformVersion != null && cfgPlatformVersion != prjPlatformVersion ) {
+		    m.element("WindowsTargetPlatformVersion", null, cfgPlatformVersion);
+		}
+	}
+
+
+	function m.preferredToolArchitecture(prj) {
+		if( _ACTION >= "vs2013" ) {
+			if( prj.preferredtoolarchitecture == p.X86_64 ) {
+				m.element("PreferredToolArchitecture", null, 'x64');
+			} else if( prj.preferredtoolarchitecture == p.X86 ) {
+				m.element("PreferredToolArchitecture", null, 'x86');
+			}
+		} else {
+			if( prj.preferredtoolarchitecture == p.X86_64 ) {
+				m.element("UseNativeEnvironment", null, 'true');
+			}
+		}
+	}
+
+
+	function m.treatLinkerWarningAsErrors(cfg) {
+		if( cfg.flags.FatalLinkWarnings ) {
+			var el = (cfg.kind == p.STATICLIB ? "Lib" : "Linker");
+			m.element("Treat" .. el .. "WarningAsErrors", null, "true");
+		}
+	}
+
+
+	function m.treatWChar_tAsBuiltInType(cfg) {
+		var map = { On = "true", Off = "false" };
+		var value = map[cfg.nativewchar];
+		if( value ) {
+			m.element("TreatWChar_tAsBuiltInType", null, value);
+		}
+	}
+
+
+	function m.treatWarningAsError(cfg) {
+		if( cfg.flags.FatalCompileWarnings && cfg.warnings != p.OFF ) {
+			m.element("TreatWarningAsError", null, "true");
+		}
+	}
+
+
+	function m.disableSpecificWarnings(cfg, condition) {
+		if( #cfg.disablewarnings > 0 ) {
+			var warnings = table.concat(cfg.disablewarnings, ";");
+			warnings = warnings .. ";%%(DisableSpecificWarnings)";
+			m.element('DisableSpecificWarnings', condition, warnings);
+		}
+	}
+
+
+	function m.treatSpecificWarningsAsErrors(cfg, condition) {
+		if( #cfg.fatalwarnings > 0 ) {
+			var fatal = table.concat(cfg.fatalwarnings, ";");
+			fatal = fatal .. ";%%(TreatSpecificWarningsAsErrors)";
+			m.element('TreatSpecificWarningsAsErrors', condition, fatal);
+		}
+	}
+
+
+	function m.useDebugLibraries(cfg) {
+		var runtime = config.getruntime(cfg) || (config.isDebugBuild(cfg) ? "Debug" : "Release");
+		m.element("UseDebugLibraries", null, tostring(runtime->endswith("Debug")));
+	}
+
+
+	function m.useOfMfc(cfg) {
+		if( cfg.flags.MFC ) {
+			m.element("UseOfMfc", null, (cfg.staticruntime == "On" ? "Static" : "Dynamic"));
+		}
+	}
+
+	function m.useOfAtl(cfg) {
+		if( cfg.atl ) {
+			m.element("UseOfATL", null, cfg.atl);
+		}
+	}
+
+
+
+	function m.userMacros(cfg) {
+		p.w('<PropertyGroup Label="UserMacros" />');
+	}
+
+
+	function m.warningLevel(cfg) {
+		var map = { Off = "TurnOffAllWarnings", Extra = "Level4" };
+		m.element("WarningLevel", null, map[cfg.warnings] || "Level3");
+	}
+
+
+	function m.warningLevelFile(cfg, condition) {
+		var map = { Off = "TurnOffAllWarnings", Extra = "Level4" };
+		if( cfg.warnings ) {
+			m.element("WarningLevel", condition, map[cfg.warnings] || "Level3");
+		}
+	}
+
+
+	function m.xmlDeclaration() {
+		p.xmlUtf8();
+	}
+
+	// Fx Functions
+	//------------------------------------------------------------------------------------------------------------
+	//------------------------------------------------------------------------------------------------------------
+
+	function m.fxCompilePreprocessorDefinition(cfg, condition) {
+		if( cfg.shaderdefines && #cfg.shaderdefines > 0 ) {
+			var shaderdefines = table.concat(cfg.shaderdefines, ";");
+
+			shaderdefines = shaderdefines .. ";%%(PreprocessorDefinitions)";
+			m.element('PreprocessorDefinitions', condition, shaderdefines);
+		}
+	}
+
+
+	function m.fxCompileShaderType(cfg, condition) {
+		if( cfg.shadertype ) {
+			m.element("ShaderType", condition, cfg.shadertype);
+		}
+	}
+
+
+	function m.fxCompileShaderModel(cfg, condition) {
+		if( cfg.shadermodel ) {
+			m.element("ShaderModel", condition, cfg.shadermodel);
+		}
+	}
+
+
+	function m.fxCompileShaderEntry(cfg, condition) {
+		if( cfg.shaderentry ) {
+			m.element("EntryPointName", condition, cfg.shaderentry);
+		}
+	}
+
+
+	function m.fxCompileShaderVariableName(cfg, condition) {
+		if( cfg.shadervariablename ) {
+			m.element("VariableName", condition, cfg.shadervariablename);
+		}
+	}
+
+
+	function m.fxCompileShaderHeaderOutput(cfg, condition) {
+		if( cfg.shaderheaderfileoutput ) {
+			m.element("HeaderFileOutput", condition, cfg.shaderheaderfileoutput);
+		}
+	}
+
+
+	function m.fxCompileShaderObjectOutput(cfg, condition) {
+		if( cfg.shaderobjectfileoutput ) {
+			m.element("ObjectFileOutput", condition, cfg.shaderobjectfileoutput);
+		}
+	}
+
+
+	function m.fxCompileShaderAssembler(cfg, condition) {
+		if( cfg.shaderassembler ) {
+			m.element("AssemblerOutput", condition, cfg.shaderassembler);
+		}
+	}
+
+
+	function m.fxCompileShaderAssemblerOutput(cfg, condition) {
+		if( cfg.shaderassembleroutput ) {
+			m.element("AssemblerOutputFile", condition, cfg.shaderassembleroutput);
+		}
+	}
+
+
+	function m.fxCompileShaderAdditionalOptions(cfg, condition) {
+		var opts = cfg.shaderoptions;
+		if( #opts > 0 ) {
+			opts = table.concat(opts, " ");
+			m.element("AdditionalOptions", condition, '%s %%(AdditionalOptions)', opts);
+		}
+	}
+
+
+//-------------------------------------------------------------------------
+//
+// Support functions
+//
+//-------------------------------------------------------------------------
+
+//
+// Format and return a Visual Studio Condition attribute.
+//
+
+	function m.conditionFromConfigText(cfgText) {
+		return string.format('Condition="\'$(Configuration)|$(Platform)\'==\'%s\'"', p.esc(cfgText));
+	}
+
+	function m.condition(cfg) {
+		return m.conditionFromConfigText(vstudio.projectConfig(cfg));
+	}
+
+//
+// Get the latest installed SDK 10 version from the registry.
+//
+
+	function m.latestSDK10Version() {
+		var arch = (os.is64bit() ? "\\WOW6432Node\\" : "\\");
+		var version = os.getWindowsRegistry("HKLM:SOFTWARE" .. arch .."Microsoft\\Microsoft SDKs\\Windows\\v10.0\\ProductVersion");
+		if( version != null ) {
+			return version .. ".0";
+		} else {
+			return null;
+		}
+	}
+
+
+//
+// Output an individual project XML element, with an optional configuration
+// condition.
+//
+// @param depth
+//    How much to indent the element.
+// @param name
+//    The element name.
+// @param condition
+//    An optional configuration condition, formatted with vc2010.condition().
+// @param value
+//    The element value, which may contain printf formatting tokens.
+// @param ...
+//    Optional additional arguments to satisfy any tokens in the value.
+//
+
+	function m.element(name, condition, value, ...) {
+		var arg = {...};
+		if( select('#',...) == 0 ) {
+			value = p.esc(value);
+		} else {
+			for( i = 1, #arg ) {
+				arg[i] = p.esc(arg[i]);
+			}
+		}
+
+		if( condition ) {
+			//defer output
+			var element = {};
+			element.name = name;
+			element.condition = condition;
+			element.value = value;
+			element.args = arg;
+			if( ... ) {
+				if( value == '%s' ) {
+					element.setting = table.concat(arg);
+				} else {
+					element.setting = value .. table.concat(arg);
+				}
+			} else {
+				element.setting = element.value;
+			}
+			table.insert(m.conditionalElements, element);
+		} else {
+			var format = string.format('<%s>%s</%s>', name, value, name);
+			p.w(format, table.unpack(arg));
+		}
+	}

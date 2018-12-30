@@ -1,0 +1,1508 @@
+//
+// xcode_common.ljs
+// Functions to generate the different sections of an Xcode project.
+// Copyright (c) 2009-2015 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var xcode = p.modules.xcode;
+	var tree  = p.tree;
+	var workspace = p.workspace;
+	var project = p.project;
+	var config = p.config;
+	var fileconfig = p.fileconfig;
+
+
+//
+// Return the Xcode build category for a given file, based on the file extension.
+//
+// @param node
+//    The node to identify.
+// @returns
+//    An Xcode build category, one of "Sources", "Resources", "Frameworks", or nil.
+//
+
+	function xcode.getbuildcategory(node) {
+		var categories = {
+			[".a"] = "Frameworks",
+			[".c"] = "Sources",
+			[".cc"] = "Sources",
+			[".cpp"] = "Sources",
+			[".cxx"] = "Sources",
+			[".dylib"] = "Frameworks",
+			[".framework"] = "Frameworks",
+			[".m"] = "Sources",
+			[".mm"] = "Sources",
+			[".strings"] = "Resources",
+			[".nib"] = "Resources",
+			[".xib"] = "Resources",
+			[".storyboard"] = "Resources",
+			[".icns"] = "Resources",
+			[".s"] = "Sources",
+			[".S"] = "Sources",
+		};
+		if( node.isResource ) {
+			return "Resources";
+		}
+		return categories[path.getextension(node.name)];
+	}
+
+	function xcode.isItemResource(project, node) {
+
+		var res;
+
+		if( project && project.xcodebuildresources ) {
+			if( type(project.xcodebuildresources) == "table" ) {
+				res = project.xcodebuildresources;
+			}
+		}
+
+		var function checkItemInList(item, list) {
+			if( item ) {
+				if( list ) {
+					if( type(list) == "table" ) {
+						for( _,v in pairs(list) ) {
+							if( string.find(item, v) ) {
+								return true;
+							}
+						}
+					}
+				}
+			}
+			return false;
+		}
+
+		//print (node.path, node.buildid, node.cfg, res)
+		if( (checkItemInList(node.path, res)) ) {
+			return true;
+		}
+
+		return false;
+	}
+
+//
+// Return 'explicitFileType' if the given file is being set with 'compileas'
+//
+
+	function xcode.getfiletypekey(node, cfg) {
+		if( node.configs ) {
+			var filecfg = fileconfig.getconfig(node, cfg);
+			if( filecfg && filecfg["compileas"] ) {
+				return "explicitFileType";
+			}
+		}
+		return "lastKnownFileType";
+	}
+//
+// Return the Xcode type for a given file, based on the file extension.
+//
+// @param fname
+//    The file name to identify.
+// @returns
+//    An Xcode file type, string.
+//
+
+	function xcode.getfiletype(node, cfg) {
+
+		if( node.configs ) {
+			var filecfg = fileconfig.getconfig(node, cfg);
+			if( filecfg ) {
+				if( p.languages.isc(filecfg.compileas) ) {
+					return "sourcecode.c.c";
+				} else if( p.languages.iscpp(filecfg.compileas) ) {
+					return "sourcecode.cpp.cpp";
+				} else if( filecfg.language == "ObjC" ) {
+					return "sourcecode.c.objc";
+				} else if( 	filecfg.language == "ObjCpp" ) {
+					return "sourcecode.cpp.objcpp";
+				}
+			}
+		}
+
+		var types = {
+			[".c"]         = "sourcecode.c.c",
+			[".cc"]        = "sourcecode.cpp.cpp",
+			[".cpp"]       = "sourcecode.cpp.cpp",
+			[".css"]       = "text.css",
+			[".cxx"]       = "sourcecode.cpp.cpp",
+			[".S"]         = "sourcecode.asm.asm",
+			[".framework"] = "wrapper.framework",
+			[".gif"]       = "image.gif",
+			[".h"]         = "sourcecode.c.h",
+			[".html"]      = "text.html",
+			[".ljs"]       = "sourcecode.ljs",
+			[".m"]         = "sourcecode.c.objc",
+			[".mm"]        = "sourcecode.cpp.objc",
+			[".nib"]       = "wrapper.nib",
+			[".storyboard"] = "file.storyboard",
+			[".pch"]       = "sourcecode.c.h",
+			[".plist"]     = "text.plist.xml",
+			[".strings"]   = "text.plist.strings",
+			[".xib"]       = "file.xib",
+			[".icns"]      = "image.icns",
+			[".s"]         = "sourcecode.asm",
+			[".bmp"]       = "image.bmp",
+			[".wav"]       = "audio.wav",
+			[".xcassets"]  = "folder.assetcatalog",
+
+		};
+		return types[path.getextension(node.path)] || "text";
+	}
+
+//
+// Print user configuration references contained in xcodeconfigreferences
+// @param offset
+//    offset used by function _p
+// @param cfg
+//    configuration
+//
+
+	var function xcodePrintUserConfigReferences(offset, cfg, tr, kind) {
+		var referenceName;
+		if( kind == "project" ) {
+			referenceName = cfg.xcodeconfigreferenceproject;
+		} else if( kind == "target" ) {
+			referenceName = cfg.xcodeconfigreferencetarget;
+		}
+		tree.traverse(tr, {
+			onleaf = function(node) {
+				filename = node.name;
+				if( node.id && path.getextension(filename) == ".xcconfig" ) {
+					if( filename == referenceName ) {
+						_p(offset, 'baseConfigurationReference = %s /* %s */;', node.id, filename);
+						return;
+					}
+				}
+			}
+		}, false);
+	}
+
+
+
+	var escapeSpecialChars = {
+		['\n'] = '\\n',
+		['\r'] = '\\r',
+		['\t'] = '\\t',
+	};
+
+	var function escapeChar(c) {
+		return escapeSpecialChars[c] || '\\'..c;
+	}
+
+	var function escapeArg(value) {
+		value = value->gsub('[\'"\\\n\r\t ]', escapeChar);
+		return value;
+	}
+
+	var function escapeSetting(value) {
+		value = value->gsub('["\\\n\r\t]', escapeChar);
+		return value;
+	}
+
+	var function stringifySetting(value) {
+		value = value..'';
+		if( ! value->match('^[%a%d_./]+$') ) {
+			value = '"'..escapeSetting(value)..'"';
+		}
+		return value;
+	}
+
+	var function customStringifySetting(value) {
+		value = value..'';
+
+		var test = value->match('^[%a%d_./%+]+$');
+		if( test ) {
+			value = '"'..escapeSetting(value)..'"';
+		}
+		return value;
+	}
+
+	var function printSetting(level, name, value) {
+		if( type(value) == 'function' ) {
+			value(level, name);
+		} else if( type(value) != 'table' ) {
+			_p(level, '%s = %s;', stringifySetting(name), stringifySetting(value));
+		//elseif #value == 1 then
+			//_p(level, '%s = %s;', stringifySetting(name), stringifySetting(value[1]))
+		} else if( #value >= 1 ) {
+			_p(level, '%s = (', stringifySetting(name));
+			for( _, item in ipairs(value) ) {
+				_p(level + 1, '%s,', stringifySetting(item));
+			}
+			_p(level, ');');
+		}
+	}
+
+	var function printSettingsTable(level, settings) {
+		// Maintain alphabetic order to be consistent
+		var keys = table.keys(settings);
+		table.sort(keys);
+		for( _, k in ipairs(keys) ) {
+			printSetting(level, k, settings[k]);
+		}
+	}
+
+	var function overrideSettings(settings, overrides) {
+		if( type(overrides) == 'table' ) {
+			for( name, value in pairs(overrides) ) {
+				// Allow an override to remove a value by using false
+				settings[name] = (! table.equals(value, { false }) ? value : null);
+			}
+		}
+	}
+
+//
+// Return the Xcode product type, based target kind.
+//
+// @param node
+//    The product node to identify.
+// @returns
+//    An Xcode product type, string.
+//
+
+	function xcode.getproducttype(node) {
+		var types = {
+			ConsoleApp   = "com.apple.product-type.tool",
+			WindowedApp  = "com.apple.product-type.application",
+			StaticLib    = "com.apple.product-type.library.static",
+			SharedLib    = "com.apple.product-type.library.dynamic",
+			OSXBundle    = "com.apple.product-type.bundle",
+			OSXFramework = "com.apple.product-type.framework",
+		};
+		return types[(node.cfg.kind == "SharedLib" && node.cfg.sharedlibtype ? node.cfg.sharedlibtype : node.cfg.kind)];
+	}
+
+
+//
+// Return the Xcode target type, based on the target file extension.
+//
+// @param node
+//    The product node to identify.
+// @returns
+//    An Xcode target type, string.
+//
+
+	function xcode.gettargettype(node) {
+		var types = {
+			ConsoleApp   = "\"compiled.mach-o.executable\"",
+			WindowedApp  = "wrapper.application",
+			StaticLib    = "archive.ar",
+			SharedLib    = "\"compiled.mach-o.dylib\"",
+			OSXBundle    = "wrapper.cfbundle",
+			OSXFramework = "wrapper.framework",
+		};
+		return types[(node.cfg.kind == "SharedLib" && node.cfg.sharedlibtype ? node.cfg.sharedlibtype : node.cfg.kind)];
+	}
+
+
+//
+// Return a unique file name for a project. Since Xcode uses .xcodeproj's to
+// represent both workspaces and projects there is a likely change of a name
+// collision. Tack on a number to differentiate them.
+//
+// @param prj
+//    The project being queried.
+// @returns
+//    A uniqued file name
+//
+
+	function xcode.getxcodeprojname(prj) {
+		// if there is a workspace with matching name, then use "projectname1.xcodeproj"
+		// just get something working for now
+		var fname = p.filename(prj, ".xcodeproj");
+		return fname;
+	}
+
+
+//
+// Returns true if the file name represents a framework.
+//
+// @param fname
+//    The name of the file to test.
+//
+
+	function xcode.isframework(fname) {
+		return (path.getextension(fname) == ".framework");
+	}
+
+
+//
+// Retrieves a unique 12 byte ID for an object.
+// This function accepts an array of parameters that will be used to generate the id.
+//
+// @returns
+//    A 24-character string representing the 12 byte ID.
+//
+
+	function xcode.newid(...) {
+		var name = '';
+		var arg = {...};
+		for( i, v in pairs(arg) ) {
+			name = name..v..'****';
+		}
+
+
+		return ("%08X%08X%08X")->format(name->hash(16777619), name->hash(2166136261), name->hash(46577619));
+	}
+
+
+//
+// Create a product tree node and all projects in a workspace; assigning IDs
+// that are needed for inter-project dependencies.
+//
+// @param wks
+//    The workspace to prepare.
+//
+
+	function xcode.prepareWorkspace(wks) {
+		// create and cache a list of supported platforms
+		wks.xcode = { };
+
+		for( prj in p.workspace.eachproject(wks) ) {
+			// need a configuration to get the target information
+			var cfg = project.getconfig(prj, prj.configurations[1], prj.platforms[1]);
+
+			// build the product tree node
+			var bundlepath = cfg.buildtarget.bundlename != "" && cfg.buildtarget.bundlename || cfg.buildtarget.name;
+			if( (prj.external) ) {
+				bundlepath = cfg.project.name;
+			}
+
+			var node = p.tree.new(path.getname(bundlepath));
+
+			node.cfg = cfg;
+			node.id = xcode.newid(node.name, "product");
+			node.targetid = xcode.newid(node.name, "target");
+
+			// attach it to the project
+			prj.xcode = {};
+			prj.xcode.projectnode = node;
+		}
+	}
+
+
+//-------------------------------------------------------------------------
+// Section generator functions, in the same order in which they appear
+// in the .pbxproj file
+//-------------------------------------------------------------------------
+
+	function xcode.PBXBuildFile(tr) {
+		var settings = {};
+		tree.traverse(tr, {
+			onnode = function(node) {
+				if( node.buildid ) {
+					settings[node.buildid] = function(level) {
+						_p(level,'%s /* %s in %s */ = {isa = PBXBuildFile; fileRef = %s /* %s */; };',
+							node.buildid, node.name, xcode.getbuildcategory(node), node.id, node.name);
+					};
+				}
+			}
+		});
+
+		if( ! table.isempty(settings) ) {
+			_p('/* Begin PBXBuildFile section */');
+			printSettingsTable(2, settings);
+			_p('/* End PBXBuildFile section */');
+			_p('');
+		}
+	}
+
+
+	function xcode.PBXContainerItemProxy(tr) {
+		var settings = {};
+		for( _, node in ipairs(tr.projects.children) ) {
+			settings[node.productproxyid] = function() {
+				_p(2,'%s /* PBXContainerItemProxy */ = {', node.productproxyid);
+				_p(3,'isa = PBXContainerItemProxy;');
+				_p(3,'containerPortal = %s /* %s */;', node.id, path.getrelative(node.parent.parent.project.location, node.path));
+				_p(3,'proxyType = 2;');
+				_p(3,'remoteGlobalIDString = %s;', node.project.xcode.projectnode.id);
+				_p(3,'remoteInfo = %s;', stringifySetting(node.project.xcode.projectnode.name));
+				_p(2,'};');
+			};
+			settings[node.targetproxyid] = function() {
+				_p(2,'%s /* PBXContainerItemProxy */ = {', node.targetproxyid);
+				_p(3,'isa = PBXContainerItemProxy;');
+				_p(3,'containerPortal = %s /* %s */;', node.id, path.getrelative(node.parent.parent.project.location, node.path));
+				_p(3,'proxyType = 1;');
+				_p(3,'remoteGlobalIDString = %s;', node.project.xcode.projectnode.targetid);
+				_p(3,'remoteInfo = %s;', stringifySetting(node.project.xcode.projectnode.name));
+				_p(2,'};');
+			};
+		}
+
+		if( ! table.isempty(settings) ) {
+			_p('/* Begin PBXContainerItemProxy section */');
+			printSettingsTable(2, settings);
+			_p('/* End PBXContainerItemProxy section */');
+			_p('');
+		}
+	}
+
+
+	function xcode.PBXFileReference(tr) {
+		var cfg = project.getfirstconfig(tr.project);
+		var settings = {};
+
+		tree.traverse(tr, {
+			onleaf = function(node) {
+				// I'm only listing files here, so ignore anything without a path
+				if( ! node.path ) {
+					return;
+				}
+
+				// is this the product node, describing the output target?
+				if( node.kind == "product" ) {
+					settings[node.id] = function(level) {
+						_p(level,'%s /* %s */ = {isa = PBXFileReference; explicitFileType = %s; includeInIndex = 0; name = %s; path = %s; sourceTree = BUILT_PRODUCTS_DIR; };',
+							node.id, node.name, xcode.gettargettype(node), stringifySetting(node.name), stringifySetting(path.getname(node.cfg.buildtarget.bundlename != "" && node.cfg.buildtarget.bundlename || node.cfg.buildtarget.relpath)));
+					};
+				// is this a project dependency?
+				} else if( node.parent.parent == tr.projects ) {
+					settings[node.parent.id] = function(level) {
+						// ms Is there something wrong with path is relative ?
+						// if we have a and b without slashes get relative should assume the same parent folder and return ../
+						// this works if we put it like below
+						var relpath = path.getrelative(path.getabsolute(tr.project.location), path.getabsolute(node.parent.project.location));
+						_p(level,'%s /* %s */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = %s; path = %s; sourceTree = SOURCE_ROOT; };',
+							node.parent.id, node.name, customStringifySetting(node.parent.name), stringifySetting(path.join(relpath, node.parent.name)));
+					};
+				// something else
+				} else {
+					settings[node.id] = function(level) {
+					var pth, src;
+					if( xcode.isframework(node.path) ) {
+						//respect user supplied paths
+						// look for special variable-starting paths for different sources
+						var nodePath = node.path;
+						var _, matchEnd, variable = string.find(nodePath, "^%$%((.+)%)/");
+						if( variable ) {
+							// by skipping the last '/' we support the same absolute/relative
+							// paths as before
+							nodePath = string.sub(nodePath, matchEnd + 1);
+						}
+						if( string.find(nodePath,'/')  ) {
+							if( string.find(nodePath,'^%.')) {
+								//error('relative paths are not currently supported for frameworks')
+								pth = path.getrelative(tr.project.location, node.path);
+								//print(tr.project.location, node.path , pth)
+								src = "SOURCE_ROOT";
+								variable = src;
+							} else {
+								pth = nodePath;
+								src = "<absolute>";
+							}
+						}
+						// if it starts with a variable, use that as the src instead
+						if( variable ) {
+							src = variable;
+							// if we are using a different source tree, it has to be relative
+							// to that source tree, so get rid of any leading '/'
+							if( string.find(pth, '^/') ) {
+								pth = string.sub(pth, 2);
+							}
+						} else {
+							pth = "System/Library/Frameworks/" .. node.path;
+							src = "SDKROOT";
+						}
+					} else {
+						// something else; probably a source code file
+						src = "<group>";
+
+						if( node.abspath ) {
+							pth = path.getrelative(tr.project.location, node.abspath);
+						} else {
+							pth = node.path;
+						}
+						//end
+						}
+						_p(level,'%s /* %s */ = {isa = PBXFileReference; %s = %s; name = %s; path = %s; sourceTree = %s; };',
+							node.id, node.name, xcode.getfiletypekey(node, cfg), xcode.getfiletype(node, cfg), stringifySetting(node.name), stringifySetting(pth), stringifySetting(src));
+					};
+				}
+			}
+		});
+
+		if( ! table.isempty(settings) ) {
+			_p('/* Begin PBXFileReference section */');
+			printSettingsTable(2, settings);
+			_p('/* End PBXFileReference section */');
+			_p('');
+		}
+	}
+
+
+	function xcode.PBXFrameworksBuildPhase(tr) {
+		_p('/* Begin PBXFrameworksBuildPhase section */');
+		_p(2,'%s /* Frameworks */ = {', tr.products.children[1].fxstageid);
+		_p(3,'isa = PBXFrameworksBuildPhase;');
+		_p(3,'buildActionMask = 2147483647;');
+		_p(3,'files = (');
+
+		// write out library dependencies
+		tree.traverse(tr.frameworks, {
+			onleaf = function(node) {
+				if( node.buildid ) {
+					_p(4,'%s /* %s in Frameworks */,', node.buildid, node.name);
+				}
+			}
+		});
+
+		// write out project dependencies
+		tree.traverse(tr.projects, {
+			onleaf = function(node) {
+				if( node.buildid ) {
+					_p(4,'%s /* %s in Frameworks */,', node.buildid, node.name);
+				}
+			}
+		});
+
+		_p(3,');');
+		_p(3,'runOnlyForDeploymentPostprocessing = 0;');
+		_p(2,'};');
+		_p('/* End PBXFrameworksBuildPhase section */');
+		_p('');
+	}
+
+
+	function xcode.PBXGroup(tr) {
+		var settings = {};
+
+		tree.traverse(tr, {
+			onnode = function(node) {
+				// Skip over anything that isn't a proper group
+				if( (node.path && #node.children == 0) || node.kind == "vgroup" ) {
+					return;
+				}
+
+				var function isAggregateTarget(node) {
+					var productsId = xcode.newid("Products");
+					return node.id == productsId && node.parent.project && node.parent.project.kind == "Utility";
+				}
+				if( isAggregateTarget(node) ) {
+					return;
+				}
+
+				settings[node.productgroupid || node.id] = function() {
+					// project references get special treatment
+					if( node.parent == tr.projects ) {
+						_p(2,'%s /* Products */ = {', node.productgroupid);
+					} else {
+						_p(2,'%s /* %s */ = {', node.id, node.name);
+					}
+
+					_p(3,'isa = PBXGroup;');
+					_p(3,'children = (');
+					for( _, childnode in ipairs(node.children) ) {
+						if( ! isAggregateTarget(childnode) ) {
+							_p(4,'%s /* %s */,', childnode.id, childnode.name);
+						}
+					}
+					_p(3,');');
+
+					if( node.parent == tr.projects ) {
+						_p(3,'name = Products;');
+					} else {
+						_p(3,'name = %s;', stringifySetting(node.name));
+
+						var vpath = project.getvpath(tr.project, node.name);
+
+						if( node.path && node.name != vpath ) {
+							var p = node.path;
+							if( node.parent.path ) {
+								p = path.getrelative(node.parent.path, node.path);
+							}
+							_p(3,'path = %s;', stringifySetting(p));
+						}
+					}
+
+					_p(3,'sourceTree = "<group>";');
+					_p(2,'};');
+				};
+			}
+		}, true);
+
+		if( ! table.isempty(settings) ) {
+			_p('/* Begin PBXGroup section */');
+			printSettingsTable(2, settings);
+			_p('/* End PBXGroup section */');
+			_p('');
+		}
+	}
+
+	var function xcode_GetBuildCommands(tr) {
+		var buildCommandInfos = {};
+		tree.traverse(tr, {
+			onnode = function(node) {
+				if( node.buildcommandid ) {
+					var info = {
+						node = node,
+						inputs = { node.relpath },
+						outputs = {},
+						depends = {},
+						transact = false,
+					};
+					for( cfg in project.eachconfig(tr.project) ) {
+						var filecfg = fileconfig.getconfig(node, cfg);
+						if( filecfg ) {
+							for( _, v in ipairs(filecfg.buildinputs) ) {
+								table.insert(info.inputs, project.getrelative(tr.project, v));
+							}
+							for( _, v in ipairs(filecfg.buildoutputs) ) {
+								table.insert(info.outputs, project.getrelative(tr.project, v));
+							}
+						}
+					}
+					table.insert(buildCommandInfos, info);
+				}
+			}
+		});
+		for( _, mine in ipairs(buildCommandInfos) ) {
+			for( _, their in ipairs(buildCommandInfos) ) {
+				if( mine != their ) {
+					for( _, input in ipairs(mine.inputs) ) {
+						if( table.contains(their.outputs, input) ) {
+							table.insert(mine.depends, their);
+							break;
+						}
+					}
+				}
+			}
+		}
+		var buildCommands = {};
+		var leftover = #buildCommandInfos;
+		while( leftover > 0 ) {
+			var prev = leftover;
+			for( _, info in ipairs(buildCommandInfos) ) {
+				if( ! info.transact ) {
+					var transact = true;
+					for( _, depend in ipairs(info.depends) ) {
+						transact = depend.transact;
+						if( ! transact ) {
+							break;
+						}
+					}
+					if( transact ) {
+						table.insert(buildCommands, info.node);
+						info.transact = true;
+						--leftover    ;
+					}
+				}
+			}
+			if( prev == leftover ) {
+				error('detect circular reference.');
+			}
+		}
+		return buildCommands;
+	}
+
+	var function xcode_PBXAggregateOrNativeTarget(tr, pbxTargetName) {
+		var kinds = {
+			Aggregate = {
+				"Utility",
+			},
+			Native = {
+				"ConsoleApp",
+				"WindowedApp",
+				"SharedLib",
+				"StaticLib",
+			},
+		};
+		var hasTarget = false;
+		for( _, node in ipairs(tr.products.children) ) {
+			hasTarget = table.contains(kinds[pbxTargetName], node.cfg.kind);
+			if( hasTarget ) {
+				break;
+			}
+		}
+		if( ! hasTarget ) {
+			return;
+		}
+
+		_p('/* Begin PBX%sTarget section */', pbxTargetName);
+
+		var buildCommands = xcode_GetBuildCommands(tr);
+
+		for( _, node in ipairs(tr.products.children) ) {
+			var name = tr.project.name;
+
+			// This function checks whether there are build commands of a specific
+			// type to be executed; they will be generated correctly, but the project
+			// commands will not contain any per-configuration commands, so the logic
+			// has to be extended a bit to account for that.
+			var function hasBuildCommands(which) {
+				// standard check...this is what existed before
+				if( #tr.project[which] > 0 ) {
+					return true;
+				}
+				// what if there are no project-level commands? check configs...
+				for( _, cfg in ipairs(tr.configs) ) {
+					if( #cfg[which] > 0 ) {
+						return true;
+					}
+				}
+			}
+
+			_p(2,'%s /* %s */ = {', node.targetid, name);
+			_p(3,'isa = PBX%sTarget;', pbxTargetName);
+			_p(3,'buildConfigurationList = %s /* Build configuration list for PBX%sTarget "%s" */;', node.cfgsection, pbxTargetName, escapeSetting(name));
+			_p(3,'buildPhases = (');
+			if( hasBuildCommands('prebuildcommands') ) {
+				_p(4,'9607AE1010C857E500CD1376 /* Prebuild */,');
+			}
+			for( _, v in ipairs(buildCommands) ) {
+				_p(4,'%s /* Build "%s" */,', v.buildcommandid, v.name);
+			}
+			if( pbxTargetName == "Native" ) {
+				_p(4,'%s /* Resources */,', node.resstageid);
+				_p(4,'%s /* Sources */,', node.sourcesid);
+			}
+			if( hasBuildCommands('prelinkcommands') ) {
+				_p(4,'9607AE3510C85E7E00CD1376 /* Prelink */,');
+			}
+			if( pbxTargetName == "Native" ) {
+				_p(4,'%s /* Frameworks */,', node.fxstageid);
+			}
+			if( hasBuildCommands('postbuildcommands') ) {
+				_p(4,'9607AE3710C85E8F00CD1376 /* Postbuild */,');
+			}
+			_p(3,');');
+			_p(3,'buildRules = (');
+			_p(3,');');
+
+			_p(3,'dependencies = (');
+			for( _, xnode in ipairs(tr.projects.children) ) {
+				_p(4,'%s /* PBXTargetDependency */,', xnode.targetdependid);
+			}
+			_p(3,');');
+
+			_p(3,'name = %s;', stringifySetting(name));
+
+			if( pbxTargetName == "Native" ) {
+				var p;
+				if( node.cfg.kind == "ConsoleApp" ) {
+					p = "$(HOME)/bin";
+				} else if( node.cfg.kind == "WindowedApp" ) {
+					p = "$(HOME)/Applications";
+				}
+				if( p ) {
+					_p(3,'productInstallPath = %s;', stringifySetting(p));
+				}
+			}
+
+			_p(3,'productName = %s;', stringifySetting(name));
+			if( pbxTargetName == "Native" ) {
+				_p(3,'productReference = %s /* %s */;', node.id, node.name);
+				_p(3,'productType = %s;', stringifySetting(xcode.getproducttype(node)));
+			}
+			_p(2,'};');
+		}
+		_p('/* End PBX%sTarget section */', pbxTargetName);
+		_p('');
+	}
+
+
+	function xcode.PBXAggregateTarget(tr) {
+		xcode_PBXAggregateOrNativeTarget(tr, "Aggregate");
+	}
+
+
+	function xcode.PBXNativeTarget(tr) {
+		xcode_PBXAggregateOrNativeTarget(tr, "Native");
+	}
+
+
+	function xcode.PBXProject(tr) {
+		_p('/* Begin PBXProject section */');
+		_p(2,'08FB7793FE84155DC02AAC07 /* Project object */ = {');
+		_p(3,'isa = PBXProject;');
+		var capabilities = tr.project.xcodesystemcapabilities;
+		if( ! table.isempty(capabilities) ) {
+			var keys = table.keys(capabilities);
+			table.sort(keys);
+			_p(3, 'attributes = {');
+			_p(4, 'TargetAttributes = {');
+			_p(5, '%s = {', tr.project.xcode.projectnode.targetid);
+			_p(6, 'SystemCapabilities = {');
+			for( _, key in pairs(keys) ) {
+				_p(7, '%s = {', key);
+				_p(8, 'enabled = %d;', (capabilities[key] ? 1 : 0));
+				_p(7, '};');
+			}
+			_p(6, '};');
+			_p(5, '};');
+			_p(4, '};');
+			_p(3, '};');
+		}
+
+		_p(3,'buildConfigurationList = 1DEB928908733DD80010E9CD /* Build configuration list for PBXProject "%s" */;', tr.name);
+		_p(3,'compatibilityVersion = "Xcode 3.2";');
+		_p(3,'hasScannedForEncodings = 1;');
+		_p(3,'mainGroup = %s /* %s */;', tr.id, tr.name);
+		_p(3,'projectDirPath = "";');
+
+		if( #tr.projects.children > 0 ) {
+			_p(3,'projectReferences = (');
+			for( _, node in ipairs(tr.projects.children) ) {
+				_p(4,'{');
+				_p(5,'ProductGroup = %s /* Products */;', node.productgroupid);
+				_p(5,'ProjectRef = %s /* %s */;', node.id, path.getname(node.path));
+				_p(4,'},');
+			}
+			_p(3,');');
+		}
+
+		_p(3,'projectRoot = "";');
+		_p(3,'targets = (');
+		for( _, node in ipairs(tr.products.children) ) {
+			_p(4,'%s /* %s */,', node.targetid, node.name);
+		}
+		_p(3,');');
+		_p(2,'};');
+		_p('/* End PBXProject section */');
+		_p('');
+	}
+
+
+	function xcode.PBXReferenceProxy(tr) {
+		var settings = {};
+
+		tree.traverse(tr.projects, {
+			onleaf = function(node) {
+				settings[node.id] = function() {
+					_p(2,'%s /* %s */ = {', node.id, node.name);
+					_p(3,'isa = PBXReferenceProxy;');
+					_p(3,'fileType = %s;', xcode.gettargettype(node));
+					_p(3,'path = %s;', stringifySetting(node.name));
+					_p(3,'remoteRef = %s /* PBXContainerItemProxy */;', node.parent.productproxyid);
+					_p(3,'sourceTree = BUILT_PRODUCTS_DIR;');
+					_p(2,'};');
+				};
+			}
+		});
+
+		if( ! table.isempty(settings) ) {
+			_p('/* Begin PBXReferenceProxy section */');
+			printSettingsTable(2, settings);
+			_p('/* End PBXReferenceProxy section */');
+			_p('');
+		}
+	}
+
+
+	function xcode.PBXResourcesBuildPhase(tr) {
+		_p('/* Begin PBXResourcesBuildPhase section */');
+		for( _, target in ipairs(tr.products.children) ) {
+			_p(2,'%s /* Resources */ = {', target.resstageid);
+			_p(3,'isa = PBXResourcesBuildPhase;');
+			_p(3,'buildActionMask = 2147483647;');
+			_p(3,'files = (');
+			tree.traverse(tr, {
+				onnode = function(node) {
+					if( xcode.getbuildcategory(node) == "Resources" ) {
+						_p(4,'%s /* %s in Resources */,', node.buildid, node.name);
+					}
+				}
+			});
+			_p(3,');');
+			_p(3,'runOnlyForDeploymentPostprocessing = 0;');
+			_p(2,'};');
+		}
+		_p('/* End PBXResourcesBuildPhase section */');
+		_p('');
+	}
+
+	function xcode.PBXShellScriptBuildPhase(tr) {
+		var wrapperWritten = false;
+
+		var function doblock(id, name, which) {
+			// start with the project-level commands (most common)
+			var prjcmds = tr.project[which];
+			var commands = table.join(prjcmds, {});
+
+			// see if there are any config-specific commands to add
+			for( _, cfg in ipairs(tr.configs) ) {
+				var cfgcmds = cfg[which];
+				if( #cfgcmds > #prjcmds ) {
+					table.insert(commands, 'if [ "${CONFIGURATION}" = "' .. cfg.buildcfg .. '" ]; then');
+					for( i = #prjcmds + 1, #cfgcmds ) {
+						table.insert(commands, cfgcmds[i]);
+					}
+					table.insert(commands, 'fi');
+				}
+			}
+
+			if( #commands > 0 ) {
+				commands = os.translateCommands(commands, p.MACOSX);
+				if( ! wrapperWritten ) {
+					_p('/* Begin PBXShellScriptBuildPhase section */');
+					wrapperWritten = true;
+				}
+				_p(2,'%s /* %s */ = {', id, name);
+				_p(3,'isa = PBXShellScriptBuildPhase;');
+				_p(3,'buildActionMask = 2147483647;');
+				_p(3,'files = (');
+				_p(3,');');
+				_p(3,'inputPaths = (');
+				_p(3,');');
+				_p(3,'name = %s;', name);
+				_p(3,'outputPaths = (');
+				_p(3,');');
+				_p(3,'runOnlyForDeploymentPostprocessing = 0;');
+				_p(3,'shellPath = /bin/sh;');
+				_p(3,'shellScript = %s;', stringifySetting(table.concat(commands, '\n')));
+				_p(2,'};');
+			}
+		}
+
+		doblock("9607AE1010C857E500CD1376", "Prebuild", "prebuildcommands");
+
+		var settings = {};
+		tree.traverse(tr, {
+			onnode = function(node) {
+				if( node.buildcommandid ) {
+					settings[node.buildcommandid] = function(level) {
+						var commands = {};
+						var inputs = {};
+						var outputs = {};
+						for( cfg in project.eachconfig(tr.project) ) {
+							var filecfg = fileconfig.getconfig(node, cfg);
+							if( filecfg ) {
+								table.insert(commands, 'if [ "${CONFIGURATION}" = "' .. cfg.buildcfg .. '" ]; then');
+								if( filecfg.buildmessage ) {
+									table.insert(commands, '\techo "' .. filecfg.buildmessage .. '"');
+								}
+								var cmds = os.translateCommandsAndPaths(filecfg.buildcommands, filecfg.project.basedir, filecfg.project.location);
+								for( _, cmd in ipairs(cmds) ) {
+									table.insert(commands, '\t' .. cmd);
+								}
+								table.insert(commands, 'fi');
+								for( _, v in ipairs(filecfg.buildinputs) ) {
+									inputs[v] = true;
+								}
+								for( _, v in ipairs(filecfg.buildoutputs) ) {
+									outputs[v] = true;
+								}
+							}
+						}
+						_p(level,'%s /* Build "%s" */ = {', node.buildcommandid, node.name);
+						_p(level+1,'isa = PBXShellScriptBuildPhase;');
+						_p(level+1,'buildActionMask = 2147483647;');
+						_p(level+1,'files = (');
+						_p(level+1,');');
+						_p(level+1,'inputPaths = (');
+						_p(level+2,'"%s",', escapeSetting(node.relpath));
+						for( v, _ in pairs(inputs) ) {
+							_p(level+2,'"%s",', escapeSetting(project.getrelative(tr.project, v)));
+						}
+						_p(level+1,');');
+						_p(level+1,'name = %s;', stringifySetting('Build "' .. node.name .. '"'));
+						_p(level+1,'outputPaths = (');
+						for( v, _ in pairs(outputs) ) {
+							_p(level+2,'"%s",', escapeSetting(project.getrelative (tr.project, v)));
+						}
+						_p(level+1,');');
+						_p(level+1,'runOnlyForDeploymentPostprocessing = 0;');
+						_p(level+1,'shellPath = /bin/sh;');
+						_p(level+1,'shellScript = %s;', stringifySetting(table.concat(commands, '\n')));
+						_p(level,'};');
+					};
+				}
+			}
+		});
+
+		if( ! table.isempty(settings) ) {
+			if( ! wrapperWritten ) {
+				_p('/* Begin PBXShellScriptBuildPhase section */');
+				wrapperWritten = true;
+			}
+			printSettingsTable(2, settings);
+		}
+
+		doblock("9607AE3510C85E7E00CD1376", "Prelink", "prelinkcommands");
+		doblock("9607AE3710C85E8F00CD1376", "Postbuild", "postbuildcommands");
+
+		if( wrapperWritten ) {
+			_p('/* End PBXShellScriptBuildPhase section */');
+			_p('');
+		}
+	}
+
+
+	function xcode.PBXSourcesBuildPhase(tr) {
+		_p('/* Begin PBXSourcesBuildPhase section */');
+		for( _, target in ipairs(tr.products.children) ) {
+			_p(2,'%s /* Sources */ = {', target.sourcesid);
+			_p(3,'isa = PBXSourcesBuildPhase;');
+			_p(3,'buildActionMask = 2147483647;');
+			_p(3,'files = (');
+			tree.traverse(tr, {
+				onleaf = function(node) {
+					if( xcode.getbuildcategory(node) == "Sources" && node.buildid ) {
+						_p(4,'%s /* %s in Sources */,', node.buildid, node.name);
+					}
+				}
+			});
+			_p(3,');');
+			_p(3,'runOnlyForDeploymentPostprocessing = 0;');
+			_p(2,'};');
+		}
+		_p('/* End PBXSourcesBuildPhase section */');
+		_p('');
+	}
+
+
+	function xcode.PBXVariantGroup(tr) {
+		var settings = {};
+		tree.traverse(tr, {
+			onbranch = function(node) {
+				settings[node.id] = function() {
+					if( node.kind == "vgroup" ) {
+						_p(2,'%s /* %s */ = {', node.id, node.name);
+						_p(3,'isa = PBXVariantGroup;');
+						_p(3,'children = (');
+						for( _, lang in ipairs(node.children) ) {
+							_p(4,'%s /* %s */,', lang.id, lang.name);
+						}
+						_p(3,');');
+						_p(3,'name = %s;', node.name);
+						_p(3,'sourceTree = "<group>";');
+						_p(2,'};');
+					}
+				};
+			}
+		});
+
+		if( ! table.isempty(settings) ) {
+			_p('/* Begin PBXVariantGroup section */');
+			printSettingsTable(2, settings);
+			_p('/* End PBXVariantGroup section */');
+			_p('');
+		}
+	}
+
+
+	function xcode.PBXTargetDependency(tr) {
+		var settings = {};
+		tree.traverse(tr.projects, {
+			onleaf = function(node) {
+				settings[node.parent.targetdependid] = function() {
+					_p(2,'%s /* PBXTargetDependency */ = {', node.parent.targetdependid);
+					_p(3,'isa = PBXTargetDependency;');
+					_p(3,'name = %s;', stringifySetting(node.name));
+					_p(3,'targetProxy = %s /* PBXContainerItemProxy */;', node.parent.targetproxyid);
+					_p(2,'};');
+				};
+			}
+		});
+
+		if( ! table.isempty(settings) ) {
+			_p('/* Begin PBXTargetDependency section */');
+			printSettingsTable(2, settings);
+			_p('/* End PBXTargetDependency section */');
+			_p('');
+		}
+	}
+
+
+	function xcode.XCBuildConfiguration_Target(tr, target, cfg) {
+		var settings = {};
+
+		settings['ALWAYS_SEARCH_USER_PATHS'] = 'NO';
+
+		if( cfg.symbols != p.OFF ) {
+			settings['DEBUG_INFORMATION_FORMAT'] = 'dwarf-with-dsym';
+		}
+
+		if( cfg.kind != "StaticLib" && cfg.buildtarget.prefix != '' ) {
+			settings['EXECUTABLE_PREFIX'] = cfg.buildtarget.prefix;
+		}
+
+		if( cfg.buildtarget.extension ) {
+			var exts = {
+				WindowedApp  = "app",
+				SharedLib    = "dylib",
+				StaticLib    = "a",
+				OSXBundle    = "bundle",
+				OSXFramework = "framework",
+			};
+			var ext = cfg.buildtarget.extension->sub(2);
+			if( ext != exts[(cfg.kind == "SharedLib" && cfg.sharedlibtype ? cfg.sharedlibtype : cfg.kind)] ) {
+				if( cfg.kind == "WindowedApp" || (cfg.kind == "SharedLib" && cfg.sharedlibtype) ) {
+					settings['WRAPPER_EXTENSION'] = ext;
+				} else if( cfg.kind == "SharedLib" || cfg.kind == "StaticLib" ) {
+					settings['EXECUTABLE_EXTENSION'] = ext;
+				}
+			}
+		}
+
+		var outdir = path.getrelative(tr.project.location, path.getdirectory(cfg.buildtarget.relpath));
+		if( outdir != "." ) {
+			settings['CONFIGURATION_BUILD_DIR'] = outdir;
+		}
+
+		settings['GCC_DYNAMIC_NO_PIC'] = 'NO';
+
+		if( tr.infoplist ) {
+			settings['INFOPLIST_FILE'] = config.findfile(cfg, path.getextension(tr.infoplist.name));
+		}
+
+		var installpaths = {
+			ConsoleApp = '/usr/local/bin',
+			WindowedApp = '"$(HOME)/Applications"',
+			SharedLib = '/usr/local/lib',
+			StaticLib = '/usr/local/lib',
+			OSXBundle = '$(LOCAL_LIBRARY_DIR)/Bundles',
+			OSXFramework = '$(LOCAL_LIBRARY_DIR)/Frameworks',
+		};
+		settings['INSTALL_PATH'] = installpaths[(cfg.kind == "SharedLib" && cfg.sharedlibtype ? cfg.sharedlibtype : cfg.kind)];
+
+		var fileNameList = {};
+		var file_tree = project.getsourcetree(tr.project);
+		tree.traverse(tr, {
+				onnode = function(node) {
+					if( node.buildid && ! node.isResource && node.abspath ) {
+						// ms this seems to work on visual studio !!!
+						// why not in xcode ??
+						var filecfg = fileconfig.getconfig(node, cfg);
+						if( filecfg && filecfg.flags.ExcludeFromBuild ) {
+						//fileNameList = fileNameList .. " " ..filecfg.name
+							table.insert(fileNameList, escapeArg(node.name));
+						}
+
+						//ms new way
+						// if the file is not in this config file list excluded it from build !!!
+						//if not cfg.files[node.abspath] then
+						//	table.insert(fileNameList, escapeArg(node.name))
+						//end
+					}
+				}
+			});
+
+		if( ! table.isempty(fileNameList) ) {
+			settings['EXCLUDED_SOURCE_FILE_NAMES'] = fileNameList;
+		}
+		settings['PRODUCT_NAME'] = (cfg.kind == "ConsoleApp" && cfg.buildtarget.extension ? cfg.buildtarget.basename .. cfg.buildtarget.extension : cfg.buildtarget.basename);
+
+		if( os.istarget(p.IOS) ) {
+			settings['SDKROOT'] = 'iphoneos';
+
+			settings['CODE_SIGN_IDENTITY[sdk=iphoneos*]'] = cfg.xcodecodesigningidentity || 'iPhone Developer';
+
+			var minOSVersion = project.systemversion(cfg);
+			if( minOSVersion != null ) {
+				settings['IPHONEOS_DEPLOYMENT_TARGET'] = minOSVersion;
+			}
+
+			var families = {
+				['iPhone/iPod touch'] = '1',
+				['iPad'] = '2',
+				['Universal'] = '1,2',
+			};
+			var family = families[cfg.iosfamily];
+			if( family ) {
+				settings['TARGETED_DEVICE_FAMILY'] = family;
+			}
+		}
+
+		//ms not by default ...add it manually if you need it
+		//settings['COMBINE_HIDPI_IMAGES'] = 'YES'
+
+		overrideSettings(settings, cfg.xcodebuildsettings);
+
+		_p(2,'%s /* %s */ = {', cfg.xcode.targetid, cfg.buildcfg);
+		_p(3,'isa = XCBuildConfiguration;');
+		_p(3,'buildSettings = {');
+		printSettingsTable(4, settings);
+		_p(3,'};');
+		printSetting(3, 'name', cfg.buildcfg);
+		_p(2,'};');
+	}
+
+
+	xcode.cLanguageStandards = {
+		["Default"] = "compiler-default",  // explicit compiler default
+		["C89"] = "c89",
+		["C90"] = "c90",
+		["C99"] = "c99",
+		["C11"] = "c11",
+		["gnu89"] = "gnu89",
+		["gnu90"] = "gnu90",
+		["gnu99"] = "gnu99",
+		["gnu11"] = "gnu11"
+	};
+
+	function xcode.XCBuildConfiguration_CLanguageStandard(settings, cfg) {
+		// if no cppdialect is provided, don't set C dialect
+		// projects without C dialect set will use compiler default
+		if( ! cfg.cdialect ) {
+			return;
+		}
+
+		var cLanguageStandard = xcode.cLanguageStandards[cfg.cdialect];
+		if( cLanguageStandard ) {
+			settings['GCC_C_LANGUAGE_STANDARD'] = cLanguageStandard;
+		}
+	}
+
+
+	xcode.cppLanguageStandards = {
+		["Default"] = "compiler-default",  // explicit compiler default
+		["C++98"] = "c++98",
+		["C++11"] = "c++11",
+		["C++14"] = "c++14",
+		["C++17"] = "c++1z",
+		["gnu++98"] = "gnu++98",
+		["gnu++11"] = "gnu++0x",  // Xcode project GUI uses gnu++0x, but gnu++11 also works
+		["gnu++14"] = "gnu++14",
+		["gnu++17"] = "gnu++1z"
+	};
+
+	function xcode.XCBuildConfiguration_CppLanguageStandard(settings, cfg) {
+		// if no cppdialect is provided, don't set C++ dialect
+		// projects without C++ dialect set will use compiler default
+		if( ! cfg.cppdialect ) {
+			return;
+		}
+
+		var cppLanguageStandard = xcode.cppLanguageStandards[cfg.cppdialect];
+		if( cppLanguageStandard ) {
+			settings['CLANG_CXX_LANGUAGE_STANDARD'] = cppLanguageStandard;
+		}
+	}
+
+
+	function xcode.XCBuildConfiguration_Project(tr, cfg) {
+		var settings = {};
+
+		var archs = {
+			Native = "$(NATIVE_ARCH_ACTUAL)",
+			x86    = "i386",
+			x86_64 = "x86_64",
+			Universal32 = "$(ARCHS_STANDARD_32_BIT)",
+			Universal64 = "$(ARCHS_STANDARD_64_BIT)",
+			Universal = "$(ARCHS_STANDARD_32_64_BIT)",
+		};
+
+		settings['ARCHS'] = archs[cfg.platform || "Native"];
+
+		//ms This is the default so don;t write it
+		//settings['SDKROOT'] = 'macosx'
+
+		var targetdir = path.getdirectory(cfg.buildtarget.relpath);
+		if( targetdir != "." ) {
+			settings['CONFIGURATION_BUILD_DIR'] = '$(SYMROOT)';
+		}
+
+		settings['CONFIGURATION_TEMP_DIR'] = '$(OBJROOT)';
+
+		if( config.isDebugBuild(cfg) ) {
+			settings['COPY_PHASE_STRIP'] = 'NO';
+		}
+
+		xcode.XCBuildConfiguration_CLanguageStandard(settings, cfg);
+		xcode.XCBuildConfiguration_CppLanguageStandard(settings, cfg);
+
+		if( cfg.exceptionhandling == p.OFF ) {
+			settings['GCC_ENABLE_CPP_EXCEPTIONS'] = 'NO';
+		}
+
+		if( cfg.rtti == p.OFF ) {
+			settings['GCC_ENABLE_CPP_RTTI'] = 'NO';
+		}
+
+		if( cfg.symbols == p.ON && cfg.editandcontinue != "Off" ) {
+			settings['GCC_ENABLE_FIX_AND_CONTINUE'] = 'YES';
+		}
+
+		if( cfg.exceptionhandling == p.OFF ) {
+			settings['GCC_ENABLE_OBJC_EXCEPTIONS'] = 'NO';
+		}
+
+		var optimizeMap = { On = 3, Size = 's', Speed = 3, Full = 'fast', Debug = 1 };
+		settings['GCC_OPTIMIZATION_LEVEL'] = optimizeMap[cfg.optimize] || 0;
+
+		if( cfg.pchheader && ! cfg.flags.NoPCH ) {
+			settings['GCC_PRECOMPILE_PREFIX_HEADER'] = 'YES';
+			settings['GCC_PREFIX_HEADER'] = cfg.pchheader;
+		}
+
+		var escapedDefines = { };
+		for( i,v in ipairs(cfg.defines) ) {
+			escapedDefines[i] = escapeArg(v);
+		}
+		settings['GCC_PREPROCESSOR_DEFINITIONS'] = escapedDefines;
+
+		settings["GCC_SYMBOLS_PRIVATE_EXTERN"] = 'NO';
+
+		if( cfg.unsignedchar != null ) {
+			settings['GCC_CHAR_IS_UNSIGNED_CHAR'] = (cfg.unsignedchar ? "YES" : "NO");
+		}
+
+		if( cfg.flags.FatalWarnings ) {
+			settings['GCC_TREAT_WARNINGS_AS_ERRORS'] = 'YES';
+		}
+
+		settings['GCC_WARN_ABOUT_RETURN_TYPE'] = 'YES';
+		settings['GCC_WARN_UNUSED_VARIABLE'] = 'YES';
+
+		var includedirs = project.getrelative(cfg.project, cfg.includedirs);
+		for( i,v in ipairs(includedirs) ) {
+			cfg.includedirs[i] = p.quoted(v);
+		}
+		settings['USER_HEADER_SEARCH_PATHS'] = cfg.includedirs;
+
+		var sysincludedirs = project.getrelative(cfg.project, cfg.sysincludedirs);
+		for( i,v in ipairs(sysincludedirs) ) {
+			cfg.sysincludedirs[i] = p.quoted(v);
+		}
+		if( ! table.isempty(cfg.sysincludedirs) ) {
+			table.insert(cfg.sysincludedirs, "$(inherited)");
+		}
+		settings['HEADER_SEARCH_PATHS'] = cfg.sysincludedirs;
+
+		for( i,v in ipairs(cfg.libdirs) ) {
+			cfg.libdirs[i] = p.project.getrelative(cfg.project, cfg.libdirs[i]);
+		}
+		settings['LIBRARY_SEARCH_PATHS'] = cfg.libdirs;
+
+		for( i,v in ipairs(cfg.frameworkdirs) ) {
+			cfg.frameworkdirs[i] = p.project.getrelative(cfg.project, cfg.frameworkdirs[i]);
+		}
+		settings['FRAMEWORK_SEARCH_PATHS'] = cfg.frameworkdirs;
+
+		var objDir = path.getrelative(tr.project.location, cfg.objdir);
+		settings['OBJROOT'] = objDir;
+
+		settings['ONLY_ACTIVE_ARCH'] = (p.config.isDebugBuild(cfg) ? 'YES' : 'NO');
+
+		// build list of "other" C/C++ flags
+		var checks = {
+			["-ffast-math"]             = cfg.floatingpoint == "Fast",
+			["-fomit-frame-pointer"]    = cfg.omitframepointer == "On",
+			["-fno-omit-frame-pointer"] = cfg.omitframepointer == "Off",
+		};
+
+		var flags = { };
+		for( flag, check in pairs(checks) ) {
+			if( check ) {
+				table.insert(flags, flag);
+			}
+		}
+
+
+		/*if (type(cfg.buildoptions) == "table") then
+			for k,v in pairs(cfg.buildoptions) do
+				table.insertflat(flags, string.explode(v," -"))
+			end
+		end
+		*/
+
+		settings['OTHER_CFLAGS'] = table.join(flags, cfg.buildoptions);
+
+		// build list of "other" linked flags. All libraries that aren't frameworks
+		// are listed here, so I don't have to try and figure out if they are ".a"
+		// or ".dylib", which Xcode requires to list in the Frameworks section
+		flags = { };
+		for( _, lib in ipairs(config.getlinks(cfg, "system")) ) {
+			if( ! xcode.isframework(lib) ) {
+				table.insert(flags, "-l" .. lib);
+			}
+		}
+
+		//ms this step is for reference projects only
+		for( _, lib in ipairs(config.getlinks(cfg, "dependencies", "object")) ) {
+			if( (lib.external) ) {
+				if( ! xcode.isframework(lib.linktarget.basename) ) {
+					table.insert(flags, "-l" .. escapeArg(lib.linktarget.basename));
+				}
+			}
+		}
+
+		settings['OTHER_LDFLAGS'] = table.join(flags, cfg.linkoptions);
+
+		if( cfg.flags.StaticRuntime ) {
+			settings['STANDARD_C_PLUS_PLUS_LIBRARY_TYPE'] = 'static';
+		}
+
+		if( targetdir != "." ) {
+			settings['SYMROOT'] = path.getrelative(tr.project.location, targetdir);
+		}
+
+		if( cfg.warnings == "Extra" ) {
+			settings['WARNING_CFLAGS'] = '-Wall -Wextra';
+		}
+
+		overrideSettings(settings, cfg.xcodebuildsettings);
+
+		_p(2,'%s /* %s */ = {', cfg.xcode.projectid, cfg.buildcfg);
+		_p(3,'isa = XCBuildConfiguration;');
+		_p(3,'buildSettings = {');
+		printSettingsTable(4, settings);
+		_p(3,'};');
+		printSetting(3, 'name', cfg.buildcfg);
+		_p(2,'};');
+	}
+
+
+	function xcode.XCBuildConfiguration(tr) {
+		var settings = {};
+
+		for( _, target in ipairs(tr.products.children) ) {
+			for( _, cfg in ipairs(tr.configs) ) {
+				settings[cfg.xcode.targetid] = function() {
+					xcode.XCBuildConfiguration_Target(tr, target, cfg);
+				};
+			}
+		}
+		for( _, cfg in ipairs(tr.configs) ) {
+			settings[cfg.xcode.projectid] = function() {
+				xcode.XCBuildConfiguration_Project(tr, cfg);
+			};
+		}
+
+		if( ! table.isempty(settings) ) {
+			_p('/* Begin XCBuildConfiguration section */');
+			printSettingsTable(0, settings);
+			_p('/* End XCBuildConfiguration section */');
+			_p('');
+		}
+	}
+
+
+	function xcode.XCBuildConfigurationList(tr) {
+		var wks = tr.project.workspace;
+		var defaultCfgName = stringifySetting(tr.configs[1].buildcfg);
+		var settings = {};
+
+		for( _, target in ipairs(tr.products.children) ) {
+			settings[target.cfgsection] = function() {
+				_p(2,'%s /* Build configuration list for PBXNativeTarget "%s" */ = {', target.cfgsection, target.name);
+				_p(3,'isa = XCConfigurationList;');
+				_p(3,'buildConfigurations = (');
+				for( _, cfg in ipairs(tr.configs) ) {
+					_p(4,'%s /* %s */,', cfg.xcode.targetid, cfg.buildcfg);
+				}
+				_p(3,');');
+				_p(3,'defaultConfigurationIsVisible = 0;');
+				_p(3,'defaultConfigurationName = %s;', defaultCfgName);
+				_p(2,'};');
+			};
+		}
+		settings['1DEB928908733DD80010E9CD'] = function() {
+			_p(2,'1DEB928908733DD80010E9CD /* Build configuration list for PBXProject "%s" */ = {', tr.name);
+			_p(3,'isa = XCConfigurationList;');
+			_p(3,'buildConfigurations = (');
+			for( _, cfg in ipairs(tr.configs) ) {
+				_p(4,'%s /* %s */,', cfg.xcode.projectid, cfg.buildcfg);
+			}
+			_p(3,');');
+			_p(3,'defaultConfigurationIsVisible = 0;');
+			_p(3,'defaultConfigurationName = %s;', defaultCfgName);
+			_p(2,'};');
+		};
+
+		_p('/* Begin XCConfigurationList section */');
+		printSettingsTable(2, settings);
+		_p('/* End XCConfigurationList section */');
+	}

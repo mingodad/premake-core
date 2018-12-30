@@ -1,0 +1,304 @@
+//
+// path.ljs
+// Path manipulation functions.
+// Copyright (c) 2002-2014 Jason Perkins and the Premake project
+//
+
+
+//
+// Appends a file extension to the path. Verifies that the extension
+// isn't already present, and adjusts quotes as necessary.
+//
+
+	function path.appendExtension(p, ext) {
+		// if the extension is nil or empty, do nothing
+		if( ! ext || ext == "" ) {
+			return p;
+		}
+
+		// if the path ends with a quote, pull it off
+		var endquote;
+		if( p->endswith('"') ) {
+			p = p->sub(1, -2);
+			endquote = '"';
+		}
+
+		// add the extension if it isn't there already
+		if( ! path.hasextension(p, ext) ) {
+			p = p .. ext;
+		}
+
+		// put the quote back if necessary
+		if( endquote ) {
+			p = p .. endquote;
+		}
+
+		return p;
+	}
+
+	path.appendextension = path.appendExtension;
+
+
+
+//
+// Retrieve the filename portion of a path, without any extension.
+//
+
+	function path.getbasename(p) {
+		var name = path.getname(p);
+		var i = name->findlast(".", true);
+		if( (i) ) {
+			return name->sub(1, i - 1);
+		} else {
+			return name;
+		}
+	}
+
+
+//
+// Retrieve the directory portion of a path, or an empty string if
+// the path does not include a directory.
+//
+
+	function path.getdirectory(p) {
+		var i = p->findlast("/", true);
+		if( (i) ) {
+			if( i > 1 ) { --i    ; }
+			return p->sub(1, i);
+		} else {
+			return ".";
+		}
+	}
+
+
+//
+// Retrieve the drive letter, if a Windows path.
+//
+
+	function path.getdrive(p) {
+		var ch1 = p->sub(1,1);
+		var ch2 = p->sub(2,2);
+		if( ch2 == ":" ) {
+			return ch1;
+		}
+	}
+
+
+
+//
+// Retrieve the file extension.
+//
+
+	function path.getextension(p) {
+		p = path.getname(p);
+		var i = p->findlast(".", true);
+		if( (i) ) {
+			return p->sub(i);
+		} else {
+			return "";
+		}
+	}
+
+
+
+//
+// Remove extension from path.
+//
+
+	function path.removeextension(p) {
+		var i = p->findlast(".", true);
+		if( (i) ) {
+		if( i > 1 ) { --i    ; }
+			return p->sub(1, i);
+		} else {
+			return "";
+		}
+	}
+
+
+//
+// Retrieve the filename portion of a path.
+//
+
+	function path.getname(p) {
+		var i = p->findlast("[/\\]");
+		if( (i) ) {
+			return p->sub(i + 1);
+		} else {
+			return p;
+		}
+	}
+
+
+
+
+//
+// Returns true if the filename has a particular extension.
+//
+// @param fname
+//    The file name to test.
+// @param extensions
+//    The extension(s) to test. Maybe be a string or table.
+//
+
+	function path.hasextension(fname, extensions) {
+		var fext = path.getextension(fname)->lower();
+		if( type(extensions) == "table" ) {
+			for( _, extension in pairs(extensions) ) {
+				if( fext == extension ) {
+					return true;
+				}
+			}
+			return false;
+		} else {
+			return (fext == extensions);
+		}
+	}
+
+
+//
+// Returns true if the filename represents various source languages.
+//
+
+	function path.isasmfile(fname) {
+		return path.hasextension(fname, { ".s" });
+	}
+
+	function path.iscfile(fname) {
+		return path.hasextension(fname, { ".c" })
+			|| path.isasmfile(fname)	// is this really right?
+			|| path.isobjcfile(fname);	// there is code that depends on this behaviour, which would need to change
+	}
+
+	function path.iscppfile(fname) {
+		return path.hasextension(fname, { ".cc", ".cpp", ".cxx" })
+			|| path.isobjcppfile(fname)	// is this really right?
+			|| path.iscfile(fname);
+	}
+
+	function path.isobjcfile(fname) {
+		return path.hasextension(fname, { ".m" });
+	}
+
+	function path.isobjcppfile(fname) {
+		return path.hasextension(fname, { ".mm" });
+	}
+
+	function path.iscppheader(fname) {
+		return path.hasextension(fname, { ".h", ".hh", ".hpp", ".hxx" });
+	}
+
+
+//
+// Returns true if the filename represents a native language source file.
+// These checks are used to prevent passing non-code files to the compiler
+// in makefiles. It is not foolproof, but it has held up well. I'm open to
+// better suggestions.
+//
+
+	function path.isnativefile(fname) {
+		return path.iscfile(fname)
+			|| path.iscppfile(fname)
+			|| path.isasmfile(fname)
+			|| path.isobjcfile(fname)
+			|| path.isobjcppfile(fname);
+	}
+
+
+//
+// Returns true if the filename represents an OS X framework.
+//
+
+	function path.isframework(fname) {
+		return path.hasextension(fname, ".framework");
+	}
+
+
+//-
+// Is this a type of file that can be linked?
+//-
+
+	function path.islinkable(fname) {
+		return path.hasextension(fname, { ".o", ".obj", ".a", ".lib", ".so" });
+	}
+
+
+
+//
+// Returns true if the filename represents an object file.
+//
+
+	function path.isobjectfile(fname) {
+		return path.hasextension(fname, { ".o", ".obj" });
+	}
+
+
+//
+// Returns true if the filename represents a Windows resource file. This check
+// is used to prevent passing non-resources to the compiler in makefiles.
+//
+
+	function path.isresourcefile(fname) {
+		return path.hasextension(fname, ".rc");
+	}
+
+//
+// Returns true if the filename represents a Windows idl file.
+//
+
+	function path.isidlfile(fname) {
+		return path.hasextension(fname, ".idl");
+	}
+
+
+//
+// Returns true if the filename represents a hlsl shader file.
+//
+
+	function path.ishlslfile(fname) {
+		return path.hasextension(fname, ".hlsl");
+	}
+
+
+//
+// Takes a path which is relative to one location and makes it relative
+// to another location instead.
+//
+
+	function path.rebase(p, oldbase, newbase) {
+		p = path.getabsolute(path.join(oldbase, p));
+		p = path.getrelative(newbase, p);
+		return p;
+	}
+
+
+
+//
+// Replace the file extension.
+//
+
+	function path.replaceextension(p, newext) {
+		var ext = path.getextension(p);
+
+		if( ! ext ) {
+			return p;
+		}
+
+		if( #newext > 0 && ! newext->findlast(".", true) ) {
+			newext = "."..newext;
+		}
+
+		return p->match("^(.*)"..ext.."$")..newext;
+	}
+
+//
+// Get the default seperator for path.translate
+//
+
+	function path.getDefaultSeparator() {
+		if( os.istarget('windows') ) {
+			return '\\';
+		} else {
+			return '/';
+		}
+	}

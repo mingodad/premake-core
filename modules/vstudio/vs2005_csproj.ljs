@@ -1,0 +1,77 @@
+//
+// vs2005_csproj.ljs
+// Generate a Visual Studio 2005+ C# project.
+// Copyright (c) Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	p.vstudio.cs2005 = {};
+
+	var vstudio = p.vstudio;
+	var cs2005 = p.vstudio.cs2005;
+	var dotnetbase = p.vstudio.dotnetbase;
+	var project = p.project;
+	var config = p.config;
+	var fileconfig = p.fileconfig;
+	var dotnet = p.tools.dotnet;
+
+	cs2005.elements = {};
+
+	cs2005.elements.project = function () {
+		return {
+			dotnetbase.xmlDeclaration,
+			dotnetbase.projectElement,
+			dotnetbase.commonProperties,
+			dotnetbase.projectProperties,
+			dotnetbase.configurations,
+			dotnetbase.applicationIcon,
+			dotnetbase.references
+		};
+	};
+
+	cs2005.elements.projectProperties = function () {
+		return {
+			dotnetbase.configurationCondition,
+			dotnetbase.platformCondition,
+			dotnetbase.productVersion,
+			dotnetbase.schemaVersion,
+			dotnetbase.projectGuid,
+			dotnetbase.outputType,
+			dotnetbase.appDesignerFolder,
+			dotnetbase.rootNamespace,
+			dotnetbase.assemblyName,
+			dotnetbase.targetFrameworkVersion,
+			dotnetbase.targetFrameworkProfile,
+			dotnetbase.fileAlignment,
+			dotnetbase.bindingRedirects,
+			dotnetbase.projectTypeGuids,
+			dotnetbase.csversion
+		};
+	};
+
+	cs2005.elements.configuration = function () {
+		return {
+			dotnetbase.propertyGroup,
+			dotnetbase.debugProps,
+			dotnetbase.outputProps,
+			dotnetbase.compilerProps,
+			dotnetbase.NoWarn
+		};
+	};
+
+	function cs2005.generate(prj) {
+		dotnetbase.prepare(cs2005);
+		dotnetbase.generate(prj);
+	}
+
+	function cs2005.targets(prj) {
+		var bin = (_ACTION <= "vs2010" ? "MSBuildBinPath" : "MSBuildToolsPath");
+		_p(1,'<Import Project="$(%s)\\Microsoft.CSharp.targets" />', bin);
+		_p(1,'<!-- To modify your build process, add your task inside one of the targets below and uncomment it.');
+		_p(1,'     Other similar extension points exist, see Microsoft.Common.targets.');
+		_p(1,'<Target Name="BeforeBuild">');
+		_p(1,'</Target>');
+		_p(1,'<Target Name="AfterBuild">');
+		_p(1,'</Target>');
+		_p(1,'-->');
+	}

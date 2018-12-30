@@ -1,0 +1,92 @@
+//
+// vs2010_vcxproj_filters.ljs
+// Generate a Visual Studio 201x C/C++ filters file.
+// Copyright (c) Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var project = p.project;
+	var tree = p.tree;
+
+	var m = p.vstudio.vc2010;
+
+
+//
+// Generate a Visual Studio 201x C++ project, with support for the new platforms API.
+//
+
+	function m.generateFilters(prj) {
+		m.xmlDeclaration();
+		m.filtersProject();
+		m.uniqueIdentifiers(prj);
+		m.filterGroups(prj);
+		p.out('</Project>');
+	}
+
+
+//
+// Output the XML declaration and opening <Project> tag.
+//
+
+	function m.filtersProject() {
+		var action = p.action.current();
+		p.push('<Project ToolsVersion="%s" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">',
+			action.vstudio.filterToolsVersion || action.vstudio.toolsVersion);
+	}
+
+
+
+	function m.filterGroups(prj) {
+		var groups = m.categorizeSources(prj);
+		for( _, group in ipairs(groups) ) {
+			group.category.emitFilter(prj, group);
+		}
+	}
+
+
+
+//
+// The first portion of the filters file assigns unique IDs to each
+// directory or virtual group. Would be cool if we could automatically
+// map vpaths like "**.h" to an <Extensions>h</Extensions> element.
+//
+
+	function m.uniqueIdentifiers(prj) {
+		var tr = project.getsourcetree(prj);
+		var contents = p.capture(function() {
+			p.push();
+			tree.traverse(tr, {
+				onbranch = function(node, depth) {
+					p.push('<Filter Include="%s">', path.translate(node.path, '\\'));
+					p.w('<UniqueIdentifier>{%s}</UniqueIdentifier>', os.uuid(node.path));
+					p.pop('</Filter>');
+				}
+			}, false);
+			p.pop();
+		});
+
+		if( #contents > 0 ) {
+			p.push('<ItemGroup>');
+			p.outln(contents);
+			p.pop('</ItemGroup>');
+		}
+	}
+
+
+	function m.filterGroup(prj, group, tag) {
+		var files = group.files;
+		if( files && #files > 0 ) {
+			p.push('<ItemGroup>');
+			for( _, file in ipairs(files) ) {
+				if( file.parent.path ) {
+					p.push('<%s Include=\"%s\">', tag, path.translate(file.relpath));
+					p.w('<Filter>%s</Filter>', path.translate(file.parent.path, '\\'));
+					p.pop('</%s>', tag);
+				} else {
+					p.w('<%s Include=\"%s\" />', tag, path.translate(file.relpath));
+				}
+			}
+			p.pop('</ItemGroup>');
+		}
+	}
+

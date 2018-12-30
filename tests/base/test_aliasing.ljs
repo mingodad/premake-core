@@ -1,0 +1,65 @@
+//
+// tests/base/test_aliasing.ljs
+// Verify handling of function aliases.
+// Copyright (c) 2015 Jason Perkins and the Premake project
+//
+
+	var suite = test.declare("premake_alias");
+	var m = {};
+
+	var p = premake;
+
+
+	function suite.setup() {
+		m.testfunc = function() {
+			return 48;
+		};
+		m.aliased = null;
+		m.aliased2 = null;
+	}
+
+
+	function suite.returnsOriginalFunction_onNoAlias() {
+		var scope, f = p.resolveAlias(m, "testfunc");
+		test.isequal("testfunc", f);
+	}
+
+
+	function suite.pointsAliasToOriginalFunction() {
+		p.alias(m, "testfunc", "aliased");
+		test.isequal(48, m.aliased());
+	}
+
+
+	function suite.returnsOriginalFunction_onAlias() {
+		p.alias(m, "testfunc", "aliased");
+		var scope, f = p.resolveAlias(m, "aliased");
+		test.isequal("testfunc", f);
+	}
+
+
+	function suite.returnsOriginalFunction_onChainedAliases() {
+		p.alias(m, "testfunc", "aliased");
+		p.alias(m, "aliased", "aliased2");
+		var scope, f = p.resolveAlias(m, "aliased2");
+		test.isequal("testfunc", f);
+	}
+
+
+	function suite.overrideResolvesAliases() {
+		p.alias(m, "testfunc", "aliased");
+		p.override(m, "aliased", function(base) {
+			return base() + 1;
+		});
+		test.isequal(49, m.testfunc());
+	}
+
+
+	function suite.aliasTracksOverrides() {
+		p.alias(m, "testfunc", "aliased");
+		p.override(m, "testfunc", function(base) {
+			return base() + 1;
+		});
+		test.isequal(49, m.aliased());
+	}
+

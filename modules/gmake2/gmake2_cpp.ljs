@@ -1,0 +1,814 @@
+//
+// gmake2_cpp.ljs
+// Generate a C/C++ project makefile.
+// (c) 2016-2017 Jason Perkins, Blizzard Entertainment and the Premake project
+//
+
+	var p = premake;
+	var gmake2 = p.modules.gmake2;
+
+	gmake2.cpp       = {};
+	var cpp        = gmake2.cpp;
+
+	var project    = p.project;
+	var config     = p.config;
+	var fileconfig = p.fileconfig;
+
+
+//-
+// Add namespace for element definition lists for premake.callarray()
+//-
+
+	cpp.elements = {};
+
+
+//
+// Generate a GNU make C++ project makefile, with support for the new platforms API.
+//
+
+	cpp.elements.makefile = function(prj) {
+		return {
+			gmake2.header,
+			gmake2.phonyRules,
+			gmake2.shellType,
+			cpp.createRuleTable,
+			cpp.outputConfigurationSection,
+			cpp.outputPerFileConfigurationSection,
+			cpp.createFileTable,
+			cpp.outputFilesSection,
+			cpp.outputRulesSection,
+			cpp.outputFileRuleSection,
+			cpp.dependencies,
+		};
+	};
+
+
+	function cpp.generate(prj) {
+		p.eol("\n");
+		p.callArray(cpp.elements.makefile, prj);
+
+		// allow the garbage collector to clean things up.
+		for( cfg in project.eachconfig(prj) ) {
+			cfg._gmake = null;
+		}
+		prj._gmake = null;
+	}
+
+
+	function cpp.initialize() {
+		rule ('cpp');
+			fileExtension ({ ".cc", ".cpp", ".cxx", ".mm" });
+			buildoutputs  ({ "$(OBJDIR)/%{file.objname}.o" });
+			buildmessage  ('$(notdir $<)');
+			buildcommands ({'$(CXX) %{premake.modules.gmake2.cpp.fileFlags(cfg, file)} $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"'});
+
+		rule ('cc');
+			fileExtension ({".c", ".s", ".m"});
+			buildoutputs  ({ "$(OBJDIR)/%{file.objname}.o" });
+			buildmessage  ('$(notdir $<)');
+			buildcommands ({'$(CC) %{premake.modules.gmake2.cpp.fileFlags(cfg, file)} $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"'});
+
+		rule ('resource');
+			fileExtension (".rc");
+			buildoutputs  ({ "$(OBJDIR)/%{file.objname}.res" });
+			buildmessage  ('$(notdir $<)');
+			buildcommands ({'$(RESCOMP) $< -O coff -o "$@" $(ALL_RESFLAGS)'});
+
+		global(null);
+	}
+
+
+	function cpp.createRuleTable(prj) {
+		var rules = {};
+
+		var function addRule(extension, rule) {
+			if( type(extension) == 'table' ) {
+				for( _, value in ipairs(extension) ) {
+					addRule(value, rule);
+				}
+			} else {
+				rules[extension] = rule;
+			}
+		}
+
+		// add all rules.
+		var usedRules = table.join({'cpp', 'cc', 'resource'}, prj.rules);
+		for( _, name in ipairs(usedRules) ) {
+			var rule = p.global.getRule(name);
+			addRule(rule.fileExtension, rule);
+		}
+
+		// create fileset categories.
+		var filesets = {
+			['.o']   = 'OBJECTS',
+			['.obj'] = 'OBJECTS',
+			['.cc']  = 'SOURCES',
+			['.cpp'] = 'SOURCES',
+			['.cxx'] = 'SOURCES',
+			['.mm']  = 'SOURCES',
+			['.c']   = 'SOURCES',
+			['.s']   = 'SOURCES',
+			['.m']   = 'SOURCES',
+			['.rc']  = 'RESOURCES',
+		};
+
+		// cache the result.
+		prj._gmake = prj._gmake || {};
+		prj._gmake.rules = rules;
+		prj._gmake.filesets = filesets;
+	}
+
+
+	function cpp.createFileTable(prj) {
+		for( cfg in project.eachconfig(prj) ) {
+			cfg._gmake = cfg._gmake || {};
+			cfg._gmake.filesets = {};
+			cfg._gmake.fileRules = {};
+
+			var files = table.shallowcopy(prj._.files);
+			table.foreachi(files, function(node) {
+				cpp.addFile(cfg, node);
+			});
+
+			for( _, f in pairs(cfg._gmake.filesets) ) {
+				table.sort(f);
+			}
+
+			cfg._gmake.kinds = table.keys(cfg._gmake.filesets);
+			table.sort(cfg._gmake.kinds);
+
+			prj._gmake.kinds = table.join(prj._gmake.kinds || {}, cfg._gmake.kinds);
+		}
+
+		// we need to reassign object sequences if we generated any files.
+		if( prj.hasGeneratedFiles && p.project.iscpp(prj) ) {
+			p.oven.assignObjectSequences(prj);
+		}
+
+		prj._gmake.kinds = table.unique(prj._gmake.kinds);
+		table.sort(prj._gmake.kinds);
+	}
+
+
+	function cpp.addFile(cfg, node) {
+		var filecfg = fileconfig.getconfig(node, cfg);
+		if( ! filecfg || filecfg.flags.ExcludeFromBuild ) {
+			return;
+		}
+
+		// skip generated files, since we try to figure it out manually below.
+		if( node.generated ) {
+			return;
+		}
+
+		// process custom build commands.
+		if( fileconfig.hasCustomBuildRule(filecfg) ) {
+			var env = table.shallowcopy(filecfg.environ);
+			env.PathVars = {
+				["file.basename"]     = { absolute = false, token = node.basename },
+				["file.abspath"]      = { absolute = true,  token = node.abspath },
+				["file.relpath"]      = { absolute = false, token = node.relpath },
+				["file.name"]         = { absolute = false, token = node.name },
+				["file.objname"]      = { absolute = false, token = node.objname },
+				["file.path"]         = { absolute = true,  token = node.path },
+				["file.directory"]    = { absolute = true,  token = path.getdirectory(node.abspath) },
+				["file.reldirectory"] = { absolute = false, token = path.getdirectory(node.relpath) },
+			};
+
+			var shadowContext = p.context.extent(filecfg, env);
+
+			var buildoutputs = p.project.getrelative(cfg.project, shadowContext.buildoutputs);
+			if( buildoutputs && #buildoutputs > 0 ) {
+				var file = {
+					buildoutputs  = buildoutputs,
+					source        = node.relpath,
+					buildmessage  = shadowContext.buildmessage,
+					buildcommands = shadowContext.buildcommands,
+					buildinputs   = p.project.getrelative(cfg.project, shadowContext.buildinputs)
+				};
+				table.insert(cfg._gmake.fileRules, file);
+
+				for( _, output in ipairs(buildoutputs) ) {
+					cpp.addGeneratedFile(cfg, node, output);
+				}
+			}
+		} else {
+			cpp.addRuleFile(cfg, node);
+		}
+	}
+
+	function cpp.determineFiletype(cfg, node) {
+		// determine which filetype to use
+		var filecfg = fileconfig.getconfig(node, cfg);
+		var fileext = path.getextension(node.abspath)->lower();
+		if( filecfg && filecfg.compileas ) {
+			if( p.languages.isc(filecfg.compileas) ) {
+				fileext = ".c";
+			} else if( p.languages.iscpp(filecfg.compileas) ) {
+				fileext = ".cpp";
+			}
+		}
+
+		return fileext;
+	}
+
+	function cpp.addGeneratedFile(cfg, source, filename) {
+		// mark that we have generated files.
+		cfg.project.hasGeneratedFiles = true;
+
+		// add generated file to the project.
+		var files = cfg.project._.files;
+		var node = files[filename];
+		if( ! node ) {
+			node = fileconfig.new(filename, cfg.project);
+			files[filename] = node;
+			table.insert(files, node);
+		}
+
+		// always overwrite the dependency information.
+		node.dependsOn = source;
+		node.generated = true;
+
+		// add to config if not already added.
+		if( ! fileconfig.getconfig(node, cfg) ) {
+			fileconfig.addconfig(node, cfg);
+		}
+
+		// determine which filetype to use
+		var fileext = cpp.determineFiletype(cfg, node);
+		// add file to the fileset.
+		var filesets = cfg.project._gmake.filesets;
+		var kind     = filesets[fileext] || "CUSTOM";
+
+		// don't link generated object files automatically if it's explicitly
+		// disabled.
+		if( path.isobjectfile(filename) && source.linkbuildoutputs == false ) {
+			kind = "CUSTOM";
+		}
+
+		var fileset = cfg._gmake.filesets[kind] || {};
+		table.insert(fileset, filename);
+		cfg._gmake.filesets[kind] = fileset;
+
+		// recursively setup rules.
+		cpp.addRuleFile(cfg, node);
+	}
+
+	function cpp.addRuleFile(cfg, node) {
+		var rules = cfg.project._gmake.rules;
+		var fileext = cpp.determineFiletype(cfg, node);
+		var rule = rules[fileext];
+		if( rule ) {
+
+			var filecfg = fileconfig.getconfig(node, cfg);
+			var environ = table.shallowcopy(filecfg.environ);
+
+			if( rule.propertydefinition ) {
+				gmake2.prepareEnvironment(rule, environ, cfg);
+				gmake2.prepareEnvironment(rule, environ, filecfg);
+			}
+
+			var shadowContext = p.context.extent(rule, environ);
+
+			var buildoutputs  = shadowContext.buildoutputs;
+			var buildmessage  = shadowContext.buildmessage;
+			var buildcommands = shadowContext.buildcommands;
+			var buildinputs   = shadowContext.buildinputs;
+
+			buildoutputs = p.project.getrelative(cfg.project, buildoutputs);
+			if( buildoutputs && #buildoutputs > 0 ) {
+				var file = {
+					buildoutputs  = buildoutputs,
+					source        = node.relpath,
+					buildmessage  = buildmessage,
+					buildcommands = buildcommands,
+					buildinputs   = buildinputs
+				};
+				table.insert(cfg._gmake.fileRules, file);
+
+				for( _, output in ipairs(buildoutputs) ) {
+					cpp.addGeneratedFile(cfg, node, output);
+				}
+			}
+		}
+	}
+
+
+//
+// Write out the settings for a particular configuration.
+//
+
+	cpp.elements.configuration = function(cfg) {
+		return {
+			cpp.tools,
+			gmake2.target,
+			gmake2.objdir,
+			cpp.pch,
+			cpp.defines,
+			cpp.includes,
+			cpp.forceInclude,
+			cpp.cppFlags,
+			cpp.cFlags,
+			cpp.cxxFlags,
+			cpp.resFlags,
+			cpp.libs,
+			cpp.ldDeps,
+			cpp.ldFlags,
+			cpp.linkCmd,
+			cpp.bindirs,
+			cpp.exepaths,
+			gmake2.settings,
+			gmake2.preBuildCmds,
+			gmake2.preLinkCmds,
+			gmake2.postBuildCmds,
+		};
+	};
+
+
+	function cpp.outputConfigurationSection(prj) {
+		_p('# Configurations');
+		_p('# #############################################');
+		_p('');
+		gmake2.outputSection(prj, cpp.elements.configuration);
+	}
+
+
+	function cpp.tools(cfg, toolset) {
+		var tool = toolset.gettoolname(cfg, "cc");
+		if( tool ) {
+			_p('ifeq ($(origin CC), default)');
+			_p('  CC = %s', tool);
+			_p('endif' );
+		}
+
+		tool = toolset.gettoolname(cfg, "cxx");
+		if( tool ) {
+			_p('ifeq ($(origin CXX), default)');
+			_p('  CXX = %s', tool);
+			_p('endif' );
+		}
+
+		tool = toolset.gettoolname(cfg, "ar");
+		if( tool ) {
+			_p('ifeq ($(origin AR), default)');
+			_p('  AR = %s', tool);
+			_p('endif' );
+		}
+
+		tool = toolset.gettoolname(cfg, "rc");
+		if( tool ) {
+			_p('RESCOMP = %s', tool);
+		}
+	}
+
+
+	function cpp.pch(cfg, toolset) {
+		// If there is no header, or if PCH has been disabled, I can early out
+		if( ! cfg.pchheader || cfg.flags.NoPCH ) {
+			return;
+		}
+
+		// Visual Studio requires the PCH header to be specified in the same way
+		// it appears in the #include statements used in the source code; the PCH
+		// source actual handles the compilation of the header. GCC compiles the
+		// header file directly, and needs the file's actual file system path in
+		// order to locate it.
+
+		// To maximize the compatibility between the two approaches, see if I can
+		// locate the specified PCH header on one of the include file search paths
+		// and, if so, adjust the path automatically so the user doesn't have
+		// add a conditional configuration to the project script.
+
+		var pch = cfg.pchheader;
+		var found = false;
+
+		// test locally in the project folder first (this is the most likely location)
+		var testname = path.join(cfg.project.basedir, pch);
+		if( os.isfile(testname) ) {
+			pch = project.getrelative(cfg.project, testname);
+			found = true;
+		} else {
+			// else scan in all include dirs.
+			for( _, incdir in ipairs(cfg.includedirs) ) {
+				testname = path.join(incdir, pch);
+				if( os.isfile(testname) ) {
+					pch = project.getrelative(cfg.project, testname);
+					found = true;
+					break;
+				}
+			}
+		}
+
+		if( ! found ) {
+			pch = project.getrelative(cfg.project, path.getabsolute(pch));
+		}
+
+		p.outln('PCH = ' .. pch);
+		p.outln('PCH_PLACEHOLDER = $(OBJDIR)/$(notdir $(PCH))');
+		p.outln('GCH = $(PCH_PLACEHOLDER).gch');
+	}
+
+
+	function cpp.defines(cfg, toolset) {
+		p.outln('DEFINES +=' .. gmake2.list(table.join(toolset.getdefines(cfg.defines, cfg), toolset.getundefines(cfg.undefines))));
+	}
+
+
+	function cpp.includes(cfg, toolset) {
+		var includes = toolset.getincludedirs(cfg, cfg.includedirs, cfg.sysincludedirs);
+		p.outln('INCLUDES +=' .. gmake2.list(includes));
+	}
+
+
+	function cpp.forceInclude(cfg, toolset) {
+		var includes = toolset.getforceincludes(cfg);
+		p.outln('FORCE_INCLUDE +=' .. gmake2.list(includes));
+	}
+
+
+	function cpp.cppFlags(cfg, toolset) {
+		var flags = gmake2.list(toolset.getcppflags(cfg));
+		p.outln('ALL_CPPFLAGS += $(CPPFLAGS)' .. flags .. ' $(DEFINES) $(INCLUDES)');
+	}
+
+
+	function cpp.cFlags(cfg, toolset) {
+		var flags = gmake2.list(table.join(toolset.getcflags(cfg), cfg.buildoptions));
+		p.outln('ALL_CFLAGS += $(CFLAGS) $(ALL_CPPFLAGS)' .. flags);
+	}
+
+
+	function cpp.cxxFlags(cfg, toolset) {
+		var flags = gmake2.list(table.join(toolset.getcxxflags(cfg), cfg.buildoptions));
+		p.outln('ALL_CXXFLAGS += $(CXXFLAGS) $(ALL_CPPFLAGS)' .. flags);
+	}
+
+
+	function cpp.resFlags(cfg, toolset) {
+		var resflags = table.join(toolset.getdefines(cfg.resdefines), toolset.getincludedirs(cfg, cfg.resincludedirs), cfg.resoptions);
+		p.outln('ALL_RESFLAGS += $(RESFLAGS) $(DEFINES) $(INCLUDES)' .. gmake2.list(resflags));
+	}
+
+
+	function cpp.libs(cfg, toolset) {
+		var flags = toolset.getlinks(cfg);
+		p.outln('LIBS +=' .. gmake2.list(flags, true));
+	}
+
+
+	function cpp.ldDeps(cfg, toolset) {
+		var deps = config.getlinks(cfg, "siblings", "fullpath");
+		p.outln('LDDEPS +=' .. gmake2.list(p.esc(deps)));
+	}
+
+
+	function cpp.ldFlags(cfg, toolset) {
+		var flags = table.join(toolset.getLibraryDirectories(cfg), toolset.getrunpathdirs(cfg, cfg.runpathdirs), toolset.getldflags(cfg), cfg.linkoptions);
+		p.outln('ALL_LDFLAGS += $(LDFLAGS)' .. gmake2.list(flags));
+	}
+
+
+	function cpp.linkCmd(cfg, toolset) {
+		if( cfg.kind == p.STATICLIB ) {
+			if( cfg.architecture == p.UNIVERSAL ) {
+				p.outln('LINKCMD = libtool -o "$@" $(OBJECTS)');
+			} else {
+				p.outln('LINKCMD = $(AR) -rcs "$@" $(OBJECTS)');
+			}
+		} else if( cfg.kind == p.UTILITY ) {
+			// Empty LINKCMD for Utility (only custom build rules)
+			p.outln('LINKCMD =');
+		} else {
+			// this was $(TARGET) $(LDFLAGS) $(OBJECTS)
+			//   but had trouble linking to certain static libs; $(OBJECTS) moved up
+			// $(LDFLAGS) moved to end (http://sourceforge.net/p/premake/patches/107/)
+			// $(LIBS) moved to end (http://sourceforge.net/p/premake/bugs/279/)
+
+			var cc = (p.languages.isc(cfg.language) ? "CC" : "CXX");
+			p.outln('LINKCMD = $(' .. cc .. ') -o "$@" $(OBJECTS) $(RESOURCES) $(ALL_LDFLAGS) $(LIBS)');
+		}
+	}
+
+
+	function cpp.bindirs(cfg, toolset) {
+		var dirs = project.getrelative(cfg.project, cfg.bindirs);
+		if( #dirs > 0 ) {
+			p.outln('EXECUTABLE_PATHS = "' .. table.concat(dirs, ":") .. '"');
+		}
+	}
+
+
+	function cpp.exepaths(cfg, toolset) {
+		var dirs = project.getrelative(cfg.project, cfg.bindirs);
+		if( #dirs > 0 ) {
+			p.outln('EXE_PATHS = export PATH=$(EXECUTABLE_PATHS):$$PATH;');
+		}
+	}
+
+
+//
+// Write out the per file configurations.
+//
+	function cpp.outputPerFileConfigurationSection(prj) {
+		_p('# Per File Configurations');
+		_p('# #############################################');
+		_p('');
+		for( cfg in project.eachconfig(prj) ) {
+			table.foreachi(prj._.files, function(node) {
+				var fcfg = fileconfig.getconfig(node, cfg);
+				if( fcfg ) {
+					cpp.perFileFlags(cfg, fcfg);
+				}
+			});
+		}
+		_p('');
+	}
+
+	function cpp.makeVarName(prj, value, saltValue) {
+		prj._gmake = prj._gmake || {};
+		prj._gmake.varlist = prj._gmake.varlist || {};
+		prj._gmake.varlistlength = prj._gmake.varlistlength || 0;
+		var cache = prj._gmake.varlist;
+		var length = prj._gmake.varlistlength;
+
+		var key = value .. saltValue;
+
+		if( (cache[key] != null) ) {
+			return cache[key], false;
+		}
+
+		var _v_var = string.format("PERFILE_FLAGS_%d", length);
+		cache[key] = _v_var;
+
+		prj._gmake.varlistlength = length + 1;
+
+		return _v_var, true;
+	}
+
+	function cpp.perFileFlags(cfg, fcfg) {
+		var toolset = gmake2.getToolSet(cfg);
+
+		var isCFile = path.iscfile(fcfg.name);
+
+		var getflags = (isCFile ? toolset.getcflags : toolset.getcxxflags);
+		var value = gmake2.list(table.join(getflags(fcfg), fcfg.buildoptions));
+
+		if( fcfg.defines || fcfg.undefines ) {
+			var defs = table.join(toolset.getdefines(fcfg.defines, cfg), toolset.getundefines(fcfg.undefines));
+			if( #defs > 0 ) {
+				value = value .. gmake2.list(defs);
+			}
+		}
+
+		if( fcfg.includedirs || fcfg.sysincludedirs ) {
+			var includes = toolset.getincludedirs(cfg, fcfg.includedirs, fcfg.sysincludedirs);
+			if( #includes > 0 ) {
+				value = value ..  gmake2.list(includes);
+			}
+		}
+
+		if( #value > 0 ) {
+			var newPerFileFlag = false;
+			fcfg.flagsVariable, newPerFileFlag = cpp.makeVarName(cfg.project, value, (isCFile ? '_C' : '_CPP'));
+			if( newPerFileFlag ) {
+				if( isCFile ) {
+					_p('%s = $(ALL_CFLAGS)%s', fcfg.flagsVariable, value);
+				} else {
+					_p('%s = $(ALL_CXXFLAGS)%s', fcfg.flagsVariable, value);
+				}
+			}
+		}
+	}
+
+	function cpp.fileFlags(cfg, file) {
+		var fcfg = fileconfig.getconfig(file, cfg);
+		var flags = {};
+
+		if( cfg.pchheader && ! cfg.flags.NoPCH && (! fcfg || ! fcfg.flags.NoPCH) ) {
+			table.insert(flags, "-include $(PCH_PLACEHOLDER)");
+		}
+
+		if( fcfg && fcfg.flagsVariable ) {
+			table.insert(flags, string.format("$(%s)", fcfg.flagsVariable));
+		} else {
+			var fileExt = cpp.determineFiletype(cfg, file);
+
+			if( path.iscfile(fileExt) ) {
+				table.insert(flags, "$(ALL_CFLAGS)");
+			} else if( path.iscppfile(fileExt) ) {
+				table.insert(flags, "$(ALL_CXXFLAGS)");
+			}
+		}
+
+		return table.concat(flags, ' ');
+	}
+
+//
+// Write out the file sets.
+//
+
+	cpp.elements.filesets = function(cfg) {
+		var result = {};
+		for( _, kind in ipairs(cfg._gmake.kinds) ) {
+			for( _, f in ipairs(cfg._gmake.filesets[kind]) ) {
+				table.insert(result, function(cfg, toolset) {
+					cpp.outputFileset(cfg, kind, f);
+				});
+			}
+		}
+		return result;
+	};
+
+	function cpp.outputFilesSection(prj) {
+		_p('# File sets');
+		_p('# #############################################');
+		_p('');
+
+		for( _, kind in ipairs(prj._gmake.kinds) ) {
+			_x('%s :=', kind);
+		}
+		_x('');
+
+		gmake2.outputSection(prj, cpp.elements.filesets);
+	}
+
+	function cpp.outputFileset(cfg, kind, file) {
+		_x('%s += %s', kind, file);
+	}
+
+
+//
+// Write out the targets.
+//
+
+	cpp.elements.rules = function(cfg) {
+		return {
+			cpp.allRules,
+			cpp.targetRules,
+			gmake2.targetDirRules,
+			gmake2.objDirRules,
+			cpp.cleanRules,
+			gmake2.preBuildRules,
+			cpp.customDeps,
+			cpp.pchRules,
+		};
+	};
+
+
+	function cpp.outputRulesSection(prj) {
+		_p('# Rules');
+		_p('# #############################################');
+		_p('');
+		gmake2.outputSection(prj, cpp.elements.rules);
+	}
+
+
+	function cpp.allRules(cfg, toolset) {
+		if( cfg.system == p.MACOSX && cfg.kind == p.WINDOWEDAPP ) {
+			_p('all: $(TARGET) $(dir $(TARGETDIR))PkgInfo $(dir $(TARGETDIR))Info.plist');
+			_p('\t@:');
+			_p('');
+			_p('$(dir $(TARGETDIR))PkgInfo:');
+			_p('$(dir $(TARGETDIR))Info.plist:');
+		} else {
+			_p('all: $(TARGET)');
+			_p('\t@:');
+		}
+		_p('');
+	}
+
+
+	function cpp.targetRules(cfg, toolset) {
+		var targets = '';
+
+		for( _, kind in ipairs(cfg._gmake.kinds) ) {
+			if( kind != 'OBJECTS' && kind != 'RESOURCES' ) {
+				targets = targets .. '$(' .. kind .. ') ';
+			}
+		}
+
+		targets = targets .. '$(OBJECTS) $(LDDEPS)';
+		if( cfg._gmake.filesets['RESOURCES'] ) {
+			targets = targets .. ' $(RESOURCES)';
+		}
+
+		_p('$(TARGET): %s | $(TARGETDIR)', targets);
+		_p('\t$(PRELINKCMDS)');
+		_p('\t@echo Linking %s', cfg.project.name);
+		_p('\t$(SILENT) $(LINKCMD)');
+		_p('\t$(POSTBUILDCMDS)');
+		_p('');
+	}
+
+
+	function cpp.customDeps(cfg, toolset) {
+		for( _, kind in ipairs(cfg._gmake.kinds) ) {
+			if( kind == 'CUSTOM' || kind == 'SOURCES' ) {
+				_p('$(%s): | prebuild', kind);
+			}
+		}
+	}
+
+
+	function cpp.cleanRules(cfg, toolset) {
+		_p('clean:');
+		_p('\t@echo Cleaning %s', cfg.project.name);
+		_p('ifeq (posix,$(SHELLTYPE))');
+		_p('\t$(SILENT) rm -f  $(TARGET)');
+		_p('\t$(SILENT) rm -rf $(OBJDIR)');
+		_p('else');
+		_p('\t$(SILENT) if exist $(subst /,\\\\,$(TARGET)) del $(subst /,\\\\,$(TARGET))');
+		_p('\t$(SILENT) if exist $(subst /,\\\\,$(OBJDIR)) rmdir /s /q $(subst /,\\\\,$(OBJDIR))');
+		_p('endif');
+		_p('');
+	}
+
+
+	function cpp.pchRules(cfg, toolset) {
+		_p('ifneq (,$(PCH))');
+		_p('$(OBJECTS): $(GCH) | $(PCH_PLACEHOLDER)');
+		_p('$(GCH): $(PCH) | prebuild');
+		_p('\t@echo $(notdir $<)');
+		var cmd = (p.languages.isc(cfg.language) ? "$(CC) -x c-header $(ALL_CFLAGS)" : "$(CXX) -x c++-header $(ALL_CXXFLAGS)");
+		_p('\t$(SILENT) %s -o "$@" -MF "$(@:%%.gch=%%.d)" -c "$<"', cmd);
+		_p('$(PCH_PLACEHOLDER): $(GCH) | $(OBJDIR)');
+		_p('ifeq (posix,$(SHELLTYPE))');
+		_p('\t$(SILENT) touch "$@"');
+		_p('else');
+		_p('\t$(SILENT) echo $null >> "$@"');
+		_p('endif');
+		_p('else');
+		_p('$(OBJECTS): | prebuild');
+		_p('endif');
+		_p('');
+	}
+
+//
+// Output the file compile targets.
+//
+
+	cpp.elements.fileRules = function(cfg) {
+		var funcs = {};
+		for( _, fileRule in ipairs(cfg._gmake.fileRules) ) {
+			table.insert(funcs, function(cfg, toolset) {
+				cpp.outputFileRules(cfg, fileRule);
+			});
+		}
+		return funcs;
+	};
+
+
+	function cpp.outputFileRuleSection(prj) {
+		_p('# File Rules');
+		_p('# #############################################');
+		_p('');
+		gmake2.outputSection(prj, cpp.elements.fileRules);
+	}
+
+
+	function cpp.outputFileRules(cfg, file) {
+		var dependencies = p.esc(file.source);
+		if( file.buildinputs && #file.buildinputs > 0 ) {
+			dependencies = dependencies .. " " .. table.concat(p.esc(file.buildinputs), " ");
+		}
+
+		_p('%s: %s', file.buildoutputs[1], dependencies);
+
+		if( file.buildmessage ) {
+			_p('\t@echo %s', file.buildmessage);
+		}
+
+		if( file.buildcommands ) {
+			var cmds = os.translateCommandsAndPaths(file.buildcommands, cfg.project.basedir, cfg.project.location);
+			for( _, cmd in ipairs(cmds) ) {
+				if( cfg.bindirs && #cfg.bindirs > 0 ) {
+					_p('\t$(SILENT) $(EXE_PATHS) %s', cmd);
+				} else {
+					_p('\t$(SILENT) %s', cmd);
+				}
+			}
+		}
+
+		// TODO: this is a hack with some imperfect side-effects.
+		//       better solution would be to emit a dummy file for the rule, and then outputs depend on it (must clean up dummy in 'clean')
+		//       better yet, is to use pattern rules, but we need to detect that all outputs have the same stem
+		if( #file.buildoutputs > 1 ) {
+			_p('%s: %s', table.concat({ table.unpack(file.buildoutputs, 2) }, ' '), file.buildoutputs[1]);
+		}
+	}
+
+
+//-------------------------------------------------------------------------
+//
+// Handlers for individual makefile elements
+//
+//-------------------------------------------------------------------------
+
+
+	function cpp.dependencies(prj) {
+		// include the dependencies, built by GCC (with the -MMD flag)
+		_p('-include $(OBJECTS:%%.o=%%.d)');
+		_p('ifneq (,$(PCH))');
+			_p('  -include $(PCH_PLACEHOLDER).d');
+		_p('endif');
+	}

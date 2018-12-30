@@ -1,0 +1,89 @@
+//-
+// tests/actions/vstudio/vc2010/test_target_machine.ljs
+// Validate generation of the <TargetMachine> element
+// Copyright (c) 2015 Jason Perkins and the Premake project
+//-
+
+	var p = premake;
+	var suite = test.declare("vstudio_vs2010_target_machine");
+	var vc2010 = p.vstudio.vc2010;
+
+
+//
+// Setup
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		p.action.set("vs2010");
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare(platform) {
+		var cfg = test.getconfig(prj, "Debug", platform);
+		vc2010.targetMachine(cfg);
+	}
+
+
+
+//
+// Emit if a static lib project contains a resource file and an
+// architecture is specified.
+//
+
+	function suite.emitsOnStaticLibWithX86() {
+		kind ("StaticLib");
+		architecture ("x86");
+		files ({ "hello.rc" });
+		prepare();
+		test.capture ([=[
+<TargetMachine>MachineX86</TargetMachine>
+		]=]);
+	}
+
+	function suite.emitsOnStaticLibWithX86_64() {
+		kind ("StaticLib");
+		architecture ("x86_64");
+		files ({ "hello.rc" });
+		prepare();
+		test.capture ([=[
+<TargetMachine>MachineX64</TargetMachine>
+		]=]);
+	}
+
+
+
+//
+// Other combinations should NOT emit anything
+//
+
+	function suite.isIgnoredOnStaticLibNoArch() {
+		kind ("StaticLib");
+		files ({ "hello.rc" });
+		prepare();
+		test.isemptycapture();
+	}
+
+	function suite.isIgnoredOnStaticLibNoResource() {
+		kind ("StaticLib");
+		architecture ("x86");
+		prepare();
+		test.isemptycapture();
+	}
+
+	function suite.isIgnoredOnConsoleApp() {
+		kind ("ConsoleApp");
+		architecture ("x86");
+		files ({ "hello.rc" });
+		prepare();
+		test.isemptycapture();
+	}
+
+	function suite.isIgnoredOnSharedLib() {
+		kind ("SharedLib");
+		architecture ("x86");
+		files ({ "hello.rc" });
+		prepare();
+		test.isemptycapture();
+	}

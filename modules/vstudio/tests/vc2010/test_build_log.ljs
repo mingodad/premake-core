@@ -1,0 +1,52 @@
+//-
+// tests/actions/vstudio/vc2010/test_build_log.ljs
+// Validate build log settings in Visual Studio 2010 C/C++ projects.
+// Copyright (c) 2015 Jason Perkins and the Premake project
+//-
+
+	var p = premake;
+	var suite = test.declare("vstudio_vs2010_build_log");
+	var vc2010 = p.vstudio.vc2010;
+
+
+//
+// Setup
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		p.action.set("vs2010");
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare(platform) {
+		var cfg = test.getconfig(prj, "Debug", platform);
+		vc2010.buildLog(cfg);
+	}
+
+
+
+//
+// Nothing should be written by default.
+//
+
+	function suite.isIgnoredByDefault() {
+		prepare();
+		test.isemptycapture();
+	}
+
+
+//
+// Write out relative path if provided.
+//
+
+	function suite.writesPathIfSet() {
+		buildlog ("logs/MyCustomLogFile.log");
+		prepare();
+		test.capture ([=[
+<BuildLog>
+	<Path>logs\MyCustomLogFile.log</Path>
+</BuildLog>
+		]=]);
+	}

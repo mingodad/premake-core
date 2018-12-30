@@ -1,0 +1,46 @@
+//
+// tests/actions/make/cpp/test_clang.ljs
+// Test Clang support in Makefiles.
+// Copyright (c) 2013 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("make_clang");
+	var make = p.make;
+	var cpp = p.make.cpp;
+	var project = p.project;
+
+
+//
+// Setup
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		wks = test.createWorkspace();
+		toolset ("clang");
+		prj = p.workspace.getproject(wks, 1);
+	}
+
+
+//
+// Make sure that the correct compilers are used.
+//
+
+	function suite.usesCorrectCompilers() {
+		make.cppConfigs(prj);
+		test.capture ([=[
+ifeq ($(config),debug)
+  ifeq ($(origin CC), default)
+    CC = clang
+  endif
+  ifeq ($(origin CXX), default)
+    CXX = clang++
+  endif
+  ifeq ($(origin AR), default)
+    AR = ar
+  endif
+		]=]);
+	}
+

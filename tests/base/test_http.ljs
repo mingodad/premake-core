@@ -1,0 +1,80 @@
+//
+// tests/base/test_http.ljs
+// Tests the http API
+// Copyright (c) 2016 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+
+	// only declare the suite as a test if http.get is an existing method.
+	var suite = {};
+	if( http.get != null ) {
+		suite = test.declare("premake_http");
+	}
+
+	function suite.http_get() {
+		var result, err = http.get("http://httpbin.org/user-agent");
+		if( result ) {
+			p.out(result);
+			test.capture(
+				'{"user-agent": "Premake/' .. _PREMAKE_VERSION .. '"}'
+			);
+		} else {
+			test.fail(err);
+		}
+	}
+
+	function suite.https_get() {
+		// sslverifypeer = 0, so we can test from within companies like here at Blizzard where all HTTPS traffic goes through
+		// some strange black box that re-signs all traffic with a custom ssl certificate.
+		var result, err = http.get("https://httpbin.org/user-agent", { sslverifypeer = 0 });
+		if( result ) {
+			p.out(result);
+			test.capture(
+				'{"user-agent": "Premake/' .. _PREMAKE_VERSION .. '"}'
+			);
+		} else {
+			test.fail(err);
+		}
+	}
+
+	function suite.https_get_verify_peer() {
+		var result, err = http.get("https://httpbin.org/user-agent");
+		if( result ) {
+			p.out(result);
+			test.capture(
+				'{"user-agent": "Premake/' .. _PREMAKE_VERSION .. '"}'
+			);
+		} else {
+			test.fail(err);
+		}
+	}
+
+	function suite.http_responsecode() {
+		var result, err, responseCode = http.get("http://httpbin.org/status/418");
+		test.isequal(responseCode, 418);
+	}
+
+	function suite.http_redirect() {
+		var result, err, responseCode = http.get("http://httpbin.org/redirect/3");
+		if( result ) {
+			test.isequal(responseCode, 200);
+		} else {
+			test.fail(err);
+		}
+	}
+
+	function suite.http_headers() {
+		var result, err, responseCode = http.get("http://httpbin.org/headers", {
+			headers = { 'X-Premake: premake' }
+		});
+
+		if( result ) {
+			if( (! result->find('X-Premake')) ) {
+				test.fail("response doens't contain header");
+				test.print(result);
+			}
+		} else {
+			test.fail(err);
+		}
+	}

@@ -1,0 +1,312 @@
+//-
+// tests/base/test_os.ljs
+// Automated test suite for the new OS functions.
+// Copyright (c) 2008-2017 Jason Perkins and the Premake project
+//-
+
+	var suite = test.declare("base_os");
+
+	var cwd;
+
+	function suite.setup() {
+		cwd = os.getcwd();
+		os.chdir(_TESTS_DIR);
+	}
+
+	function suite.teardown() {
+		os.chdir(cwd);
+	}
+
+
+//
+// os.findlib() tests
+//
+
+	function suite.findlib_FindSystemLib() {
+		if( os.istarget("windows") ) {
+			test.istrue(os.findlib("user32"));
+		} else if( os.istarget("haiku") ) {
+			test.istrue(os.findlib("root"));
+		} else {
+			test.istrue(os.findlib("m"));
+		}
+	}
+
+	function suite.findlib_FailsOnBadLibName() {
+		test.isfalse(os.findlib("NoSuchLibraryAsThisOneHere"));
+	}
+
+	function suite.findheader_stdheaders() {
+		if( ! os.istarget("windows") && ! os.istarget("macosx") ) {
+			test.istrue(os.findheader("stdlib.h"));
+		}
+	}
+
+	function suite.findheader_failure() {
+		test.isfalse(os.findheader("Knights/who/say/Ni.hpp"));
+	}
+
+
+//
+// os.isfile() tests
+//
+
+	function suite.isfile_ReturnsTrue_OnExistingFile() {
+		test.istrue(os.isfile("_tests.ljs"));
+	}
+
+	function suite.isfile_ReturnsFalse_OnNonexistantFile() {
+		test.isfalse(os.isfile("no_such_file.ljs"));
+	}
+
+
+
+//
+// os.matchdirs() tests
+//
+
+	function suite.matchdirs_skipsDottedDirs() {
+		var result = os.matchdirs("*");
+		test.isfalse(table.contains(result, ".."));
+	}
+
+
+
+//
+// os.matchfiles() tests
+//
+
+	function suite.matchfiles_OnNonRecursive() {
+		var result = os.matchfiles("*.ljs");
+		test.istrue(table.contains(result, "_tests.ljs"));
+		test.isfalse(table.contains(result, "folder/ok.ljs"));
+	}
+
+	function suite.matchfiles_Recursive() {
+		var result = os.matchfiles("**.ljs");
+		test.istrue(table.contains(result, "folder/ok.ljs"));
+	}
+
+	function suite.matchfiles_SkipsDotDirs_OnRecursive() {
+		var result = os.matchfiles("**.ljs");
+		test.isfalse(table.contains(result, ".svn/text-base/testfx.ljs.svn-base"));
+	}
+
+	function suite.matchfiles_OnSubfolderMatch() {
+		var result = os.matchfiles("**/subfolder/*");
+		test.istrue(table.contains(result, "folder/subfolder/hello.txt"));
+		test.isfalse(table.contains(result, "premake4.ljs"));
+	}
+
+	function suite.matchfiles_OnDotSlashPrefix() {
+		var result = os.matchfiles("./**.ljs");
+		test.istrue(table.contains(result, "folder/ok.ljs"));
+	}
+
+	function suite.matchfiles_OnImplicitEndOfString() {
+		var result = os.matchfiles("folder/*.ljs");
+		test.istrue(table.contains(result, "folder/ok.ljs"));
+		test.isfalse(table.contains(result, "folder/ok.ljs.2"));
+	}
+
+	function suite.matchfiles_OnLeadingDotSlashWithPath() {
+		var result = os.matchfiles("./folder/*.ljs");
+		test.istrue(table.contains(result, "folder/ok.ljs"));
+	}
+
+	function suite.matchfiles_OnDottedFile() {
+		var result = os.matchfiles("base/.*");
+		test.istrue(table.contains(result, "base/.testDotFile"));
+	}
+
+	function suite.matchfiles_onComboSearch() {
+		var result = os.matchfiles("folder/**/*.txt");
+		test.istrue(table.contains(result, "folder/subfolder/hello.txt"));
+	}
+
+
+//
+// os.pathsearch() tests
+//
+
+	function suite.pathsearch_ReturnsNil_OnNotFound() {
+		test.istrue(os.pathsearch("nosuchfile", "aaa;bbb;ccc") == null);
+	}
+
+	function suite.pathsearch_ReturnsPath_OnFound() {
+		test.isequal(_TESTS_DIR, os.pathsearch("_tests.ljs", _TESTS_DIR));
+	}
+
+	function suite.pathsearch_FindsFile_OnComplexPath() {
+		test.isequal(_TESTS_DIR, os.pathsearch("_tests.ljs", "aaa;" .. _TESTS_DIR .. ";bbb"));
+	}
+
+	function suite.pathsearch_NilPathsAllowed() {
+		test.isequal(_TESTS_DIR, os.pathsearch("_tests.ljs", null, _TESTS_DIR, null));
+	}
+
+
+//
+// os.outputof() tests
+//
+
+	// Check if outputof returns the command exit code
+	// in addition of the command output
+	function suite.outputof_commandExitCode() {
+		if( os.istarget("macosx")
+			|| os.istarget("linux")
+			|| os.istarget("solaris")
+			|| os.istarget("bsd")
+		) {
+			// Assumes 'true' and 'false' commands exist
+			// which should be the case on all *nix platforms
+			for( cmd, exitcode in pairs ({
+				["true"] = 0,
+				["false"] = 1
+			})
+			) {
+				var o, e = os.outputof(cmd);
+				test.isequal(e, exitcode);
+			}
+		}
+	}
+
+
+//
+// os.translateCommand() tests
+//
+
+	function suite.translateCommand_onNoToken() {
+		test.isequal("cp a b", os.translateCommands("cp a b"));
+	}
+
+	function suite.translateCommand_callsProcessor() {
+		os.commandTokens.test = {
+			copy = function(value) { return "test " .. value; }
+		};
+		test.isequal("test a b", os.translateCommands("{COPY} a b", "test"));
+	}
+
+	function suite.translateCommand_callsProcessor_multipleTokens() {
+		os.commandTokens.test = {
+			copy = function(value) { return "test " .. value; }
+		};
+		test.isequal("test a b; test c d; test e f;", os.translateCommands("{COPY} a b; {COPY} c d; {COPY} e f;", "test"));
+	}
+
+//
+// os.translateCommand() windows COPY tests
+//
+
+	function suite.translateCommand_windowsCopyNoDst() {
+		test.isequal('IF EXIST a\\ (xcopy /Q /E /Y /I a > nul) ELSE (xcopy /Q /Y /I a > nul)', os.translateCommands('{COPY} a', "windows"));
+	}
+
+	function suite.translateCommand_windowsCopyNoDst_ExtraSpace() {
+		test.isequal('IF EXIST a\\ (xcopy /Q /E /Y /I a > nul) ELSE (xcopy /Q /Y /I a > nul)', os.translateCommands('{COPY} a ', "windows"));
+	}
+
+	function suite.translateCommand_windowsCopyNoQuotes() {
+		test.isequal('IF EXIST a\\ (xcopy /Q /E /Y /I a b > nul) ELSE (xcopy /Q /Y /I a b > nul)', os.translateCommands('{COPY} a b', "windows"));
+	}
+
+	function suite.translateCommand_windowsCopyNoQuotes_ExtraSpace() {
+		test.isequal('IF EXIST a\\ (xcopy /Q /E /Y /I a b > nul) ELSE (xcopy /Q /Y /I a b > nul)', os.translateCommands('{COPY} a b ', "windows"));
+	}
+
+	function suite.translateCommand_windowsCopyQuotes() {
+		test.isequal('IF EXIST "a a"\\ (xcopy /Q /E /Y /I "a a" "b" > nul) ELSE (xcopy /Q /Y /I "a a" "b" > nul)', os.translateCommands('{COPY} "a a" "b"', "windows"));
+	}
+
+	function suite.translateCommand_windowsCopyQuotes_ExtraSpace() {
+		test.isequal('IF EXIST "a a"\\ (xcopy /Q /E /Y /I "a a" "b" > nul) ELSE (xcopy /Q /Y /I "a a" "b" > nul)', os.translateCommands('{COPY} "a a" "b" ', "windows"));
+	}
+
+	function suite.translateCommand_windowsCopyNoQuotesDst() {
+		test.isequal('IF EXIST "a a"\\ (xcopy /Q /E /Y /I "a a" b > nul) ELSE (xcopy /Q /Y /I "a a" b > nul)', os.translateCommands('{COPY} "a a" b', "windows"));
+	}
+
+	function suite.translateCommand_windowsCopyNoQuotesDst_ExtraSpace() {
+		test.isequal('IF EXIST "a a"\\ (xcopy /Q /E /Y /I "a a" b > nul) ELSE (xcopy /Q /Y /I "a a" b > nul)', os.translateCommands('{COPY} "a a" b ', "windows"));
+	}
+
+	function suite.translateCommand_windowsCopyNoQuotesSrc() {
+		test.isequal('IF EXIST a\\ (xcopy /Q /E /Y /I a "b" > nul) ELSE (xcopy /Q /Y /I a "b" > nul)', os.translateCommands('{COPY} a "b"', "windows"));
+	}
+
+	function suite.translateCommand_windowsCopyNoQuotesSrc_ExtraSpace() {
+		test.isequal('IF EXIST a\\ (xcopy /Q /E /Y /I a "b" > nul) ELSE (xcopy /Q /Y /I a "b" > nul)', os.translateCommands('{COPY} a "b" ', "windows"));
+	}
+
+//
+// os.getWindowsRegistry windows tests
+//
+	function suite.getreg_nonExistentValue() {
+		if( os.ishost("windows") ) {
+			var x = os.getWindowsRegistry("HKCU:Should\\Not\\Exist\\At\\All");
+			test.isequal(null, x);
+		}
+	}
+
+	function suite.getreg_nonExistentDefaultValue() {
+		if( os.ishost("windows") ) {
+			var x = os.getWindowsRegistry("HKCU:Should\\Not\\Exist\\At\\All\\");
+			test.isequal(null, x);
+		}
+	}
+
+	function suite.getreg_noSeparators() {
+		if( os.ishost("windows") ) {
+			os.getWindowsRegistry("HKCU:ShouldNotExistAtAll");
+		}
+	}
+
+	function suite.getreg_namedValue() {
+		if( os.ishost("windows") ) {
+			var x = os.getWindowsRegistry("HKCU:Environment\\TEMP");
+			test.istrue(x != null);
+		}
+	}
+
+	function suite.getreg_namedValueOptSeparator() {
+		if( os.ishost("windows") ) {
+			var x = os.getWindowsRegistry("HKCU:\\Environment\\TEMP");
+			test.istrue(x != null);
+		}
+	}
+
+	function suite.getreg_defaultValue() {
+		if( os.ishost("windows") ) {
+			var x = os.getWindowsRegistry("HKLM:SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\Minimal\\AppInfo\\");
+			test.isequal("Service", x);
+		}
+	}
+
+
+//
+// os.getversion tests.
+//
+
+	function suite.getversion() {
+		var version = os.getversion();
+		test.istrue(version != null);
+	}
+
+
+
+//
+// os.translateCommandsAndPaths.
+//
+
+	function suite.translateCommandsAndPaths() {
+		test.isequal('cmdtool "../foo/path1"', os.translateCommandsAndPaths("cmdtool %[path1]", '../foo', '.', 'osx'));
+	}
+
+	function suite.translateCommandsAndPaths_PreserveSlash() {
+		test.isequal('cmdtool "../foo/path1/"', os.translateCommandsAndPaths("cmdtool %[path1/]", '../foo', '.', 'osx'));
+	}
+
+	function suite.translateCommandsAndPaths_MultipleTokens() {
+		test.isequal('cmdtool "../foo/path1" "../foo/path2/"', os.translateCommandsAndPaths("cmdtool %[path1] %[path2/]", '../foo', '.', 'osx'));
+	}
+

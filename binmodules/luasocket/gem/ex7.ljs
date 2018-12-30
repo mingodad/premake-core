@@ -1,0 +1,16 @@
+function sink.table(t) {
+  t = t || {};
+  var f = function(chunk, err) {
+    if( chunk ) { table.insert(t, chunk); }
+    return 1;
+  };
+  return f, t;
+}
+
+var function fnull() {
+  return 1;
+}
+
+function sink.snull() {
+  return fnull;
+}

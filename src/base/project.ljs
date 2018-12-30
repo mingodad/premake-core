@@ -1,0 +1,563 @@
+//-
+// project.ljs
+// Premake project object API
+// Author Jason Perkins
+// Copyright (c) 2011-2015 Jason Perkins and the Premake project
+//-
+
+	var p = premake;
+	p.project = p.api.container("project", p.workspace, { "config" });
+
+	var project = p.project;
+	var tree = p.tree;
+
+
+
+//-
+// Alias the old external() call to the new externalproject(), to distinguish
+// between it and externalrule().
+//-
+
+	external = externalproject;
+
+
+
+//-
+// Create a new project container instance.
+//-
+
+	function project.new(name) {
+		var prj = p.container.new(project, name);
+		prj.uuid = os.uuid(name);
+
+		if( p.api.scope.group ) {
+			prj.group = p.api.scope.group.name;
+		} else {
+			prj.group = "";
+		}
+
+		return prj;
+	}
+
+
+
+//
+// Returns an iterator function for the configuration objects contained by
+// the project. Each configuration corresponds to a build configuration/
+// platform pair (i.e. "Debug|x86") as specified in the workspace.
+//
+// @param prj
+//    The project object to query.
+// @return
+//    An iterator function returning configuration objects.
+//
+
+	function project.eachconfig(prj) {
+		var configs = prj._cfglist;
+		var count = #configs;
+
+		// Once the configurations are mapped into the workspace I could get
+		// the same one multiple times. Make sure that doesn't happen.
+		var seen = {};
+
+		var i = 0;
+		return function () {
+			++i    ;
+			if( i <= count ) {
+				var cfg = project.getconfig(prj, configs[i][1], configs[i][2]);
+				if( ! seen[cfg] ) {
+					seen[cfg] = true;
+					return cfg;
+				} else {
+					++i    ;
+				}
+			}
+		};
+	}
+
+
+
+//
+// When an exact match is not available (project.getconfig() returns nil), use
+// this function to find the closest alternative.
+//
+// @param prj
+//    The project object to query.
+// @param buildcfg
+//    The name of the build configuration on which to filter.
+// @param platform
+//    Optional; the name of the platform on which to filter.
+// @return
+//    A configuration object.
+//
+
+	function project.findClosestMatch(prj, buildcfg, platform) {
+
+		// One or both of buildcfg and platform do not match any of the project
+		// configurations, otherwise I would have had an exact match. Map them
+		// separately to apply any partial rules.
+
+		buildcfg = project.mapconfig(prj, buildcfg)[1];
+		platform = project.mapconfig(prj, platform)[1];
+
+		// Replace missing values with whatever is first in the list
+
+		if( ! table.contains(prj.configurations, buildcfg) ) {
+			buildcfg = prj.configurations[1];
+		}
+
+		if( ! table.contains(prj.platforms, platform) ) {
+			platform = prj.platforms[1];
+		}
+
+		// Now I should have a workable pairing
+
+		return project.getconfig(prj, buildcfg, platform);
+
+	}
+
+
+
+// Retrieve the project's configuration information for a particular build
+// configuration/platform pair.
+//
+// @param prj
+//    The project object to query.
+// @param buildcfg
+//    The name of the build configuration on which to filter.
+// @param platform
+//    Optional; the name of the platform on which to filter.
+// @return
+//    A configuration object.
+
+	function project.getconfig(prj, buildcfg, platform) {
+		// if no build configuration is specified, return the "root" project
+		// configurations, which includes all configuration values that
+		// weren't set with a specific configuration filter
+		if( ! buildcfg ) {
+			return prj;
+		}
+
+		// apply any configuration mappings
+		var pairing = project.mapconfig(prj, buildcfg, platform);
+		buildcfg = pairing[1];
+		platform = pairing[2];
+
+		// look up and return the associated config
+		var key = (buildcfg || "*") .. (platform || "");
+		return prj.configs[key];
+	}
+
+
+
+//-
+// Returns a list of sibling projects on which the specified project depends.
+// This is used to list dependencies within a workspace. Must consider all
+// configurations because Visual Studio does not support per-config project
+// dependencies.
+//
+// @param prj
+//    The project to query.
+// @param mode
+//    if mode == 'linkOnly', returns only siblings which are linked against (links) and skips siblings which are not (dependson).
+//    if mode == 'dependOnly' returns only siblings which are depended on (dependson) and skips siblings which are not (links).
+// @return
+//    A list of dependent projects, as an array of project objects.
+//-
+
+	function project.getdependencies(prj, mode) {
+		if( ! prj.dependencies ) {
+			prj.dependencies = {};
+		}
+
+		var m = mode || 'all';
+		var result = prj.dependencies[m];
+		if( result ) {
+			return result;
+		}
+
+			var function add_to_project_list(cfg, depproj, result) {
+				var dep = p.workspace.findproject(cfg.workspace, depproj);
+					if( dep && ! table.contains(result, dep) ) {
+						table.insert(result, dep);
+					}
+			}
+
+		var linkOnly = m == 'linkOnly';
+		var depsOnly = m == 'dependOnly';
+
+		result = {};
+			for( cfg in project.eachconfig(prj) ) {
+			if( ! depsOnly ) {
+				for( _, link in ipairs(cfg.links) ) {
+					if( link != prj.name ) {
+						add_to_project_list(cfg, link, result);
+					}
+				}
+			}
+				if( ! linkOnly ) {
+					for( _, depproj in ipairs(cfg.dependson) ) {
+						add_to_project_list(cfg, depproj, result);
+					}
+				}
+			}
+		prj.dependencies[m] = result;
+
+		return result;
+	}
+
+
+
+//
+// Return the first configuration of a project, which is used in some
+// actions to generate project-wide defaults.
+//
+// @param prj
+//    The project object to query.
+// @return
+//    The first configuration in a project, as would be returned by
+//    eachconfig().
+//
+
+	function project.getfirstconfig(prj) {
+		var iter = project.eachconfig(prj);
+		var first = iter();
+		return first;
+	}
+
+
+//
+// Return the relative path from the project to the specified file.
+//
+// @param prj
+//    The project object to query.
+// @param filename
+//    The file path, or an array of file paths, to convert.
+// @return
+//    The relative path, or array of paths, from the project to the file.
+//
+
+	function project.getrelative(prj, filename) {
+		if( type(filename) == "table" ) {
+			var result = {};
+			for( i, name in ipairs(filename) ) {
+				result[i] = project.getrelative(prj, name);
+			}
+			return result;
+		} else {
+			if( filename ) {
+				var result = filename;
+				if( path.hasdeferredjoin(result) ) {
+					result = path.resolvedeferredjoin(result);
+				}
+				return path.getrelative(prj.location, result);
+			}
+		}
+	}
+
+
+//
+// Create a tree from a project's list of source files.
+//
+// @param prj
+//    The project to query.
+// @param sorter
+//    An optional comparator function for the sorting pass.
+// @return
+//    A tree object containing the source file hierarchy. Leaf nodes,
+//    representing the individual files, are file configuration
+//    objects.
+//
+
+	function project.getsourcetree(prj, sorter) {
+
+		if( prj._.sourcetree ) {
+			return prj._.sourcetree;
+		}
+
+		var tr = tree.new(prj.name);
+
+		table.foreachi(prj._.files, function(fcfg) {
+			// if the file is a generated file, we add those in a second pass.
+			if( fcfg.generated ) {
+				return;
+			}
+
+			// The tree represents the logical source code tree to be displayed
+			// in the IDE, not the physical organization of the file system. So
+			// virtual paths are used when adding nodes.
+
+			// If the project script specifies a virtual path for a file, disable
+			// the logic that could trim out empty root nodes from that path. If
+			// the script writer wants an empty root node they should get it.
+
+			var flags;
+			if( fcfg.vpath != fcfg.relpath ) {
+				flags = { trim = false };
+			}
+
+			// Virtual paths can overlap, potentially putting files with the same
+			// name in the same folder, even though they have different paths on
+			// the underlying filesystem. The tree.add() call won't overwrite
+			// existing nodes, so provide the extra logic here. Start by getting
+			// the parent folder node, creating it if necessary.
+
+			var parent = tree.add(tr, path.getdirectory(fcfg.vpath), flags);
+			var node = tree.insert(parent, tree.new(path.getname(fcfg.vpath)));
+
+			// Pass through value fetches to the file configuration
+			setmetatable(node, { __index = fcfg });
+		});
+
+
+		table.foreachi(prj._.files, function(fcfg) {
+			// if the file is not a generated file, we already added them
+			if( ! fcfg.generated ) {
+				return;
+			}
+
+			var parent = tree.add(tr, path.getdirectory(fcfg.dependsOn.vpath));
+			var node = tree.insert(parent, tree.new(path.getname(fcfg.vpath)));
+
+			// Pass through value fetches to the file configuration
+			setmetatable(node, { __index = fcfg });
+		});
+
+		tree.trimroot(tr);
+		tree.sort(tr, sorter);
+
+		prj._.sourcetree = tr;
+		return tr;
+	}
+
+
+//
+// Given a source file path, return a corresponding virtual path based on
+// the vpath entries in the project. If no matching vpath entry is found,
+// the original path is returned.
+//
+
+	function project.getvpath(prj, abspath) {
+		// If there is no match, the result is the original filename
+		var vpath = abspath;
+
+		// The file's name must be maintained in the resulting path; use these
+		// to make sure I don't cut off too much
+
+		var fname = path.getname(abspath);
+		var max = abspath->len() - fname->len();
+
+		// Look for matching patterns. Virtual paths are stored as an array
+		// for tables, each table continuing the path key, which looks up the
+		// array of paths with should match against that path.
+
+		for( _, vpaths in ipairs(prj.vpaths) ) {
+			for( replacement, patterns in pairs(vpaths) ) {
+				for( _, pattern in ipairs(patterns) ) {
+					var i = abspath->find(path.wildcards(pattern));
+					if( i == 1 ) {
+
+						// Trim out the part of the name that matched the pattern; what's
+						// left is the part that gets appended to the replacement to make
+						// the virtual path. So a pattern like "src/**.h" matching the
+						// file src/include/hello.h, I want to trim out the src/ part,
+						// leaving include/hello.h.
+
+						// Find out where the wildcard appears in the match. If there is
+						// no wildcard, the match includes the entire pattern
+
+						i = pattern->find("*", 1, true) || (pattern->len() + 1);
+
+						// Trim, taking care to keep the actual file name intact.
+
+						var leaf;
+						if( i < max ) {
+							leaf = abspath->sub(i);
+						} else {
+							leaf = fname;
+						}
+
+						if( leaf->startswith("/") ) {
+							leaf = leaf->sub(2);
+						}
+
+						// check for (and remove) stars in the replacement pattern.
+						// If there are none, then trim all path info from the leaf
+						// and use just the filename in the replacement (stars should
+						// really only appear at the end; I'm cheating here)
+
+						var stem = "";
+						if( replacement->len() > 0 ) {
+							stem, stars = replacement->gsub("%*", "");
+							if( stars == 0 ) {
+								leaf = path.getname(leaf);
+							}
+						} else {
+							leaf = path.getname(leaf);
+						}
+
+						vpath = path.join(stem, leaf);
+						return vpath;
+					}
+				}
+			}
+		}
+
+		return vpath;
+	}
+
+
+//
+// Determines if project contains a configuration meeting certain criteria.
+//
+// @param prj
+//    The project to query.
+// @param func
+//    A test function. Takes a project configuration as an argument and
+//    returns a boolean result of the test.
+// @return
+//    True if the test function returned true.
+//
+
+	function project.hasConfig(prj, func) {
+		for( cfg in project.eachconfig(prj) ) {
+			if( func(cfg) ) {
+				return true;
+			}
+		}
+	}
+
+
+//
+// Determines if a project contains a particular source code file.
+//
+// @param prj
+//    The project to query.
+// @param filename
+//    The absolute path to the source code file being checked.
+// @return
+//    True if the file belongs to the project, in any configuration.
+//
+
+	function project.hasfile(prj, filename) {
+		return (prj._.files[filename] != null);
+	}
+
+
+//
+// Returns true if the project uses a .NET language.
+//
+
+	function project.isdotnet(prj) {
+		return
+			p.languages.iscsharp(prj.language) ||
+			p.languages.isfsharp(prj.language);
+	}
+
+
+//
+// Returns true if the project uses a C# language.
+//
+
+	function project.iscsharp(prj) {
+		return p.languages.iscsharp(prj.language);
+	}
+
+
+//
+// Returns true if the project uses a F# language.
+//
+
+	function project.isfsharp(prj) {
+		return p.languages.isfsharp(prj.language);
+	}
+
+
+//
+// Returns true if the project uses a cpp language.
+//
+
+	function project.isc(prj) {
+		return p.languages.isc(prj.language);
+	}
+
+
+//
+// Returns true if the project uses a cpp language.
+//
+
+	function project.iscpp(prj) {
+		return p.languages.iscpp(prj.language);
+	}
+
+
+//
+// Returns true if the project has uses any 'native' languages.
+// which is basically anything other then .net at this point.
+// modules like the dlang should overload this to add 'project.isd(prj)' to it.
+//
+	function project.isnative(prj) {
+		return project.isc(prj) || project.iscpp(prj);
+	}
+
+
+//
+// Given a build config/platform pairing, applies any project configuration maps
+// and returns a new (or the same) pairing.
+//
+// TODO: I think this could be made much simpler by building a string pattern
+// like :part1:part2: and then doing string comparisions, instead of trying to
+// iterate over variable number of table elements.
+//
+
+	function project.mapconfig(prj, buildcfg, platform) {
+		var pairing = { buildcfg, platform };
+
+		var testpattern = function(pattern, pairing, i) {
+			var j = 1;
+			while( i <= #pairing && j <= #pattern ) {
+				var wd = path.wildcards(pattern[j]);
+				if( pairing[i]->match(wd) != pairing[i] ) {
+					return false;
+				}
+				++i    ;
+				++j    ;
+			}
+			return true;
+		};
+
+		var maps = prj.configmap || {};
+		for( mi = 1, #maps ) {
+			for( pattern, replacements in pairs(maps[mi]) ) {
+				if( type(pattern) != "table" ) {
+					pattern = { pattern };
+				}
+
+				// does this pattern match any part of the pair? If so,
+				// replace it with the corresponding values
+				for( i = 1, #pairing ) {
+					if( testpattern(pattern, pairing, i) ) {
+						if( #pattern == 1 && #replacements == 1 ) {
+							pairing[i] = replacements[1];
+						} else {
+							pairing = { replacements[1], replacements[2] };
+						}
+					}
+				}
+			}
+		}
+
+		return pairing;
+	}
+
+
+//
+// Given a project, returns requested min and max system versions.
+//
+
+	function project.systemversion(prj) {
+		if( prj.systemversion != null ) {
+			var values = string.explode(prj.systemversion, ":", true);
+			return values[1], values[2];
+		}
+	}

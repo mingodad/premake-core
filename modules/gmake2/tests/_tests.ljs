@@ -1,0 +1,16 @@
+require ("gmake2");
+
+return {
+	"test_gmake2_buildcmds.ljs",
+	"test_gmake2_clang.ljs",
+	"test_gmake2_file_rules.ljs",
+	"test_gmake2_flags.ljs",
+	"test_gmake2_ldflags.ljs",
+	"test_gmake2_linking.ljs",
+	"test_gmake2_makefile.ljs",
+	"test_gmake2_objects.ljs",
+	"test_gmake2_pch.ljs",
+	"test_gmake2_perfile_flags.ljs",
+	"test_gmake2_target_rules.ljs",
+	"test_gmake2_tools.ljs",
+};

@@ -1,7 +1,7 @@
 MSDEV       = vs2012
 CONFIG      = release
 PLATFORM    = x86
-LUA_DIR     = contrib/lua/src
+LUA_DIR     = contrib/ljs/src
 LUASHIM_DIR = contrib/luashim
 
 SRC		= src/host/*.c			\

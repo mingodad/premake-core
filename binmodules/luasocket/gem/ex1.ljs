@@ -1,0 +1,4 @@
+var CRLF = "\013\010";
+var input = source.chain(source.file(io.stdin), normalize(CRLF));
+var output = sink.file(io.stdout);
+pump.all(input, output);

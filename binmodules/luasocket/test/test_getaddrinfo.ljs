@@ -1,0 +1,15 @@
+var socket = require ("socket");
+var addresses = assert(socket.dns.getaddrinfo("localhost"));
+assert(type(addresses) == 'table');
+
+var ipv4mask = "^%d%d?%d?%.%d%d?%d?%.%d%d?%d?%.%d%d?%d?$";
+
+for( i, alt in ipairs(addresses) ) {
+  if( alt.family == 'inet' ) {
+    assert(type(alt.addr) == 'string');
+    assert(alt.addr->find(ipv4mask));
+    assert(alt.addr == '127.0.0.1');
+  }
+}
+
+print("done!");

@@ -1,0 +1,575 @@
+//
+// config.ljs
+// Premake configuration object API
+// Copyright (c) 2011-2015 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+
+	p.config = {};
+
+	var project = p.project;
+	var config = p.config;
+
+
+//-
+// Helper function for getlinkinfo() and gettargetinfo(); builds the
+// name parts for a configuration, for building or linking.
+//
+// @param cfg
+//    The configuration object being queried.
+// @param kind
+//    The target kind (SharedLib, StaticLib).
+// @param field
+//    One of "target" or "implib", used to locate the naming information
+//    in the configuration object (i.e. targetdir, targetname, etc.)
+// @return
+//    A target info object; see one of getlinkinfo() or gettargetinfo()
+//    for more information.
+//-
+
+	function config.buildtargetinfo(cfg, kind, field) {
+		var basedir = cfg.project.location;
+
+		var targetdir;
+		if( cfg.platform ) {
+			targetdir = path.join(basedir, 'bin', cfg.platform, cfg.buildcfg);
+		} else {
+			targetdir = path.join(basedir, 'bin', cfg.buildcfg);
+		}
+
+		var directory = cfg[field.."dir"] || cfg.targetdir || targetdir;
+		var basename = cfg[field.."name"] || cfg.targetname || cfg.project.name;
+
+		var prefix = cfg[field.."prefix"] || cfg.targetprefix || "";
+		var suffix = cfg[field.."suffix"] || cfg.targetsuffix || "";
+		var extension = cfg[field.."extension"] || cfg.targetextension || "";
+
+		var bundlename = "";
+		var bundlepath = "";
+
+		if( table.contains(os.getSystemTags(cfg.system), "darwin") && (kind == p.WINDOWEDAPP || (kind == p.SHAREDLIB && cfg.sharedlibtype)) ) {
+			bundlename = basename .. extension;
+			bundlepath = path.join(bundlename, (kind == p.SHAREDLIB && cfg.sharedlibtype == "OSXFramework" ? "Versions/A" : "Contents/MacOS"));
+		}
+
+		var info = {};
+		info.directory  = directory;
+		info.basename   = basename .. suffix;
+		info.name       = prefix .. info.basename .. extension;
+		info.extension  = extension;
+		info.abspath    = path.join(directory, info.name);
+		info.fullpath   = info.abspath;
+		info.bundlename = bundlename;
+		info.bundlepath = path.join(directory, bundlepath);
+		info.prefix     = prefix;
+		info.suffix     = suffix;
+		return info;
+	}
+
+
+//-
+// Determine whether the given configuration can meaningfully link
+// against the target object.
+//
+// @param cfg
+//    The configuration to be tested.
+// @param target
+//    The object to test against. This can be a library file name, or a
+//    configuration from another project.
+// @param linkage
+//    Optional. For languages or environments that support different kinds of
+//    linking (i.e. Managed/CLR C++, which can link both managed and unmanaged
+//    libs), which one to return. One of "unmanaged", "managed". If not
+//    specified, the default for the configuration will be used.
+// @return
+//    True if linking the target into the configuration makes sense.
+//-
+
+	function config.canLink(cfg, target, linkage) {
+
+		// Have I got a project configuration? If so, I've got some checks
+		// I can do with the extra information
+
+		if( type(target) != "string" ) {
+
+			// Can't link against executables
+
+			if( target.kind != "SharedLib" && target.kind != "StaticLib" ) {
+				return false;
+			}
+
+			// Can't link managed and unmanaged projects
+
+			var cfgManaged = project.isdotnet(cfg.project) || (cfg.clr != p.OFF);
+			var tgtManaged = project.isdotnet(target.project) || (target.clr != p.OFF);
+			return (cfgManaged == tgtManaged);
+
+		}
+
+		// For now, I assume that everything listed in a .NET project can be
+		// linked; unmanaged code is simply not supported
+
+		if( project.isdotnet(cfg.project) ) {
+			return true;
+		}
+
+		// In C++ projects, managed dependencies must explicitly include
+		// the ".dll" extension, to distinguish from unmanaged libraries
+
+		var isManaged = (path.getextension(target) == ".dll");
+
+		// Unmanaged projects can never link managed assemblies
+
+		if( isManaged && cfg.clr == p.OFF ) {
+			return false;
+		}
+
+		// Only allow this link it matches the requested linkage
+
+		return (isManaged) == (linkage == "managed");
+
+	}
+
+
+//
+// Determines if this configuration can be linked incrementally.
+//
+
+	function config.canLinkIncremental(cfg) {
+		if( cfg.kind == "StaticLib"
+				|| config.isOptimizedBuild(cfg)
+				|| cfg.flags.NoIncrementalLink ) {
+			return false;
+		}
+		return true;
+	}
+
+
+
+//
+// Check a configuration for a source code file with the specified
+// extension. Used for locating special files, such as Windows
+// ".def" module definition files.
+//
+// @param cfg
+//    The configuration object to query.
+// @param ext
+//    The file extension for which to search.
+// @return
+//    The full file name if found, nil otherwise.
+//
+
+	function config.findfile(cfg, ext) {
+		for( _, fname in ipairs(cfg.files) ) {
+			if( fname->endswith(ext) ) {
+				return project.getrelative(cfg.project, fname);
+			}
+		}
+	}
+
+
+//-
+// Retrieve linking information for a specific configuration. That is,
+// the path information that is required to link against the library
+// built by this configuration.
+//
+// @param cfg
+//    The configuration object to query.
+// @return
+//    A table with these values:
+//      basename   - the target with no directory or file extension
+//      name       - the target name and extension, with no directory
+//      directory  - relative path to the target, with no file name
+//      extension  - the file extension
+//      prefix     - the file name prefix
+//      suffix     - the file name suffix
+//      fullpath   - directory, name, and extension relative to project
+//      abspath    - absolute directory, name, and extension
+//-
+
+	function config.getlinkinfo(cfg) {
+		// if the configuration target is a DLL, and an import library
+		// is provided, change the kind as import libraries are static.
+		var kind = cfg.kind;
+		if( project.isnative(cfg.project)  ) {
+			if( cfg.system == p.WINDOWS && kind == p.SHAREDLIB && ! cfg.flags.NoImportLib ) {
+				kind = p.STATICLIB;
+			}
+		}
+		return config.buildtargetinfo(cfg, kind, "implib");
+	}
+
+
+//
+// Retrieve a list of link targets from a configuration.
+//
+// @param cfg
+//    The configuration object to query.
+// @param kind
+//    The type of links to retrieve; one of:
+//      siblings     - linkable sibling projects
+//      system       - system (non-sibling) libraries
+//      dependencies - all sibling dependencies, including non-linkable
+//      all          - return everything
+// @param part
+//    How the link target should be expressed; one of:
+//      name      - the decorated library name with no directory
+//      basename  - the undecorated library name
+//      directory - just the directory, no name
+//      fullpath  - full path with decorated name
+//      object    - return the project object of the dependency
+//    Or, a function(original, decorated) can be supplied, in which case it
+//    will be called for each matching link, providing the original value as
+//    it was specified in links(), and the decorated value.
+// @param linkage
+//    Optional. For languages or environments that support different kinds of
+//    linking (i.e. Managed/CLR C++, which can link both managed and unmanaged
+//    libs), which one to return. One of "unmanaged", "managed". If not
+//    specified, the default for the configuration will be used.
+// @return
+//    An array containing the requested link target information.
+//
+
+	function config.getlinks(cfg, kind, part, linkage) {
+		var result = {};
+
+		// If I'm building a list of link directories, include libdirs
+
+		if( part == "directory" ) {
+			table.foreachi(cfg.libdirs, function(dir) {
+				table.insert(result, project.getrelative(cfg.project, dir));
+			});
+		}
+
+		// Iterate all of the links listed in the configuration and boil
+		// them down to the requested data set
+
+		for( i = 1, #cfg.links ) {
+			var link = cfg.links[i];
+			var item;
+
+			// Sort the links into "sibling" (is another project in this same
+			// workspace) and "system" (is not part of this workspace) libraries.
+
+			var prj = p.workspace.findproject(cfg.workspace, link);
+			if( prj && kind != "system" ) {
+
+				// Sibling; is there a matching configuration in this project that
+				// is compatible with linking to me?
+
+				var prjcfg = project.getconfig(prj, cfg.buildcfg, cfg.platform);
+				if( prjcfg && (kind == "dependencies" || config.canLink(cfg, prjcfg)) ) {
+
+					// Yes; does the caller want the whole project config or only part?
+					if( part == "object" ) {
+						item = prjcfg;
+					} else {
+						item = project.getrelative(cfg.project, prjcfg.linktarget.fullpath);
+					}
+
+				}
+
+			} else if( ! prj && (kind == "system" || kind == "all") ) {
+
+				// Make sure this library makes sense for the requested linkage; don't
+				// link managed .DLLs into unmanaged code, etc.
+
+				if( config.canLink(cfg, link, linkage) ) {
+					// if the target is listed via an explicit path (i.e. not a
+					// system library or assembly), make it project-relative
+					item = link;
+					if( item->find("/", null, true) ) {
+						item = project.getrelative(cfg.project, item);
+					}
+				}
+
+			}
+
+			// If this is something I can link against, pull out the requested part
+			// dont link against my self
+			if( item && item != cfg ) {
+				if( part == "directory" ) {
+					item = path.getdirectory(item);
+					if( item == "." ) {
+						item = null;
+					}
+				} else if( part == "name" ) {
+					item = path.getname(item);
+				} else if( part == "basename" ) {
+					item = path.getbasename(item);
+				} else if( type(part) == "function" ) {
+					part(link, item);
+				}
+			}
+
+			// Add it to the list, skipping duplicates
+
+			if( item && ! table.contains(result, item) ) {
+				table.insert(result, item);
+			}
+
+		}
+
+		return result;
+	}
+
+
+//
+// Determines the correct runtime library for a configuration.
+//
+// @param cfg
+//    The configuration object to query.
+// @return
+//    A string identifying the runtime library, one of
+//    StaticDebug, StaticRelease, SharedDebug, SharedRelease.
+//
+
+	function config.getruntime(cfg) {
+		if( (! cfg.staticruntime || cfg.staticruntime == "Default") && ! cfg.runtime ) {
+			return null; // indicate that no runtime was explicitly selected
+		}
+
+		var linkage = (cfg.staticruntime == "On" ? "Static" : "Shared"); // assume 'Shared' is default?
+
+		if( ! cfg.runtime ) {
+			return linkage .. (config.isDebugBuild(cfg) ? "Debug" : "Release");
+		} else {
+			return linkage .. cfg.runtime;
+		}
+	}
+
+
+//
+// Retrieve information about a configuration's build target.
+//
+// @param cfg
+//    The configuration object to query.
+// @return
+//    A table with these values:
+//      basename   - the target with no directory or file extension
+//      name       - the target name and extension, with no directory
+//      directory  - relative path to the target, with no file name
+//      extension  - the file extension
+//      prefix     - the file name prefix
+//      suffix     - the file name suffix
+//      fullpath   - directory, name, and extension, relative to project
+//      abspath    - absolute directory, name, and extension
+//      bundlepath - the relative path and file name of the bundle
+//
+
+	function config.gettargetinfo(cfg) {
+		return config.buildtargetinfo(cfg, cfg.kind, "target");
+	}
+
+
+
+//-
+// Returns true if any of the files in the provided container pass the
+// provided test function.
+//-
+
+	function config.hasFile(this, testfn) {
+		var files = this.files;
+		for( i = 1, #files ) {
+			if( testfn(files[i]) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+
+
+//
+// Determine if the specified library or assembly reference should be copied
+// to the build's target directory. "Copy Local" is the terminology used by
+// Visual Studio C# projects for this feature.
+//
+// @param cfg
+//    The configuration to query. Can be a project (and will be for C#
+//    projects).
+// @param linkname
+//    The name of the library or assembly reference to check. This should
+//    match the name as it was provided in the call to links().
+// @param default
+//    The value to return if the library is not mentioned in any settings.
+// @return
+//    True if the library should be copied local, false otherwise.
+//
+
+	function config.isCopyLocal(cfg, linkname, default) {
+		if( cfg.flags.NoCopyLocal ) {
+			return false;
+		}
+
+		if( #cfg.copylocal > 0 ) {
+			return table.contains(cfg.copylocal, linkname);
+		}
+
+		return default;
+	}
+
+
+//
+// Determine if a configuration represents a "debug" or "release" build.
+// This controls the runtime library selected for Visual Studio builds
+// (and might also be useful elsewhere).
+//
+
+	function config.isDebugBuild(cfg) {
+		return cfg.symbols != null &&
+				cfg.symbols != p.OFF &&
+				cfg.symbols != "Default" &&
+				! config.isOptimizedBuild(cfg);
+	}
+
+
+//
+// Determine if this configuration uses one of the optimize flags.
+// Optimized builds get different treatment, such as full linking
+// instead of incremental.
+//
+
+	function config.isOptimizedBuild(cfg) {
+		return cfg.optimize != null && cfg.optimize != p.OFF && cfg.optimize != "Debug";
+	}
+
+
+//
+// Does this configuration's list of links contain the specified
+// project? Performs a case-insensitive search for the project's
+// name in the configuration's link array.
+//
+// @param cfg
+//    The configuration to query.
+// @param prjName
+//    The name of the project for which to search.
+// @return
+//    True if the project name is found in the configuration's
+//    list of links; nil otherwise.
+//
+
+	function config.linksToProject(cfg, prjName) {
+		prjName = prjName->lower();
+		var n = #cfg.links;
+		for( i = 1,n ) {
+			if( cfg.links[i]->lower() == prjName ) {
+				return true;
+			}
+		}
+	}
+
+
+//
+// Map the values contained in the configuration to an array of flags.
+//
+// @param cfg
+//    The configuration to map.
+// @param mappings
+//    A mapping from configuration fields and values to flags. See
+//    the GCC tool interface for examples of these mappings.
+// @return
+//    An array containing the translated flags.
+//
+
+	function config.mapFlags(cfg, mappings) {
+		var flags = {};
+
+		// Helper function to append replacement values to the result
+
+		var function add(replacement) {
+			if( type(replacement) == "function" ) {
+				replacement = replacement(cfg);
+			}
+			table.insertflat(flags, replacement);
+		}
+
+		// To ensure we get deterministic results that don't change as more keys
+		// are added to the map, and to open the possibility to controlling the
+		// application order of flags, use a prioritized list of fields to order
+		// the mapping, even though it takes a little longer.
+
+		for( field in p.field.eachOrdered() ) {
+			var map = mappings[field.name];
+			if( map ) {
+
+				// Pass each cfg value in the list through the map and append the
+				// replacement, if any, to the result
+
+				var values = cfg[field.name];
+				if( type(values) == "boolean" ) {
+					values = (values ? "On" : "Off");
+				}
+				if( type(values) != "table" ) {
+					values = { values };
+				}
+
+				var foundValue = false;
+				table.foreachi(values, function(value) {
+					var replacement = map[value];
+					if( replacement != null ) {
+						foundValue = true;
+						add(replacement);
+					}
+				});
+
+				// If no value was mapped, check to see if the map specifies a
+				// default value and, if so, push that into the result
+
+				if( ! foundValue ) {
+					add(map._);
+				}
+
+				// Finally, check for "not values", which should be added to the
+				// result if the corresponding value is not present
+
+				for( key, replacement in pairs(map) ) {
+					if( #key > 1 && key->startswith("_") ) {
+						key = key->sub(2);
+						if( values[key] == null ) {
+							add(replacement);
+						}
+					}
+				}
+
+			}
+		}
+
+		return flags;
+	}
+
+
+//-
+// Returns both a project configuration and a file configuration from a
+// configuration argument that could be either.
+//
+// @param cfg
+//    A project or file configuration object.
+// @return
+//    Both a project configuration and a file configuration. If the input
+//    argument is a project configuration, the file configuration value is
+//    returned as nil.
+//-
+
+	function config.normalize(cfg) {
+		if( cfg && cfg.config != null ) {
+			return cfg.config, cfg;
+		} else {
+			return cfg, null;
+		}
+	}
+
+
+
+//-
+// Return the appropriate toolset adapter for the provided configuration,
+// or nil if no toolset is specified. If a specific version was provided,
+// returns that as a second argument.
+//-
+
+	function config.toolset(cfg) {
+		if( cfg.toolset ) {
+			return p.tools.canonical(cfg.toolset);
+		}
+	}

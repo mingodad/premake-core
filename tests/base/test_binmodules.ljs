@@ -1,0 +1,19 @@
+//
+// tests/base/test_binmodules.ljs
+// Verify handling of binary modules.
+// Copyright (c) 2017 Tom van Dijck and the Premake project
+//
+
+	var suite = test.declare("premake_binmodules");
+	var p = premake;
+
+
+	function suite.setup() {
+		require("example");
+	}
+
+
+	function suite.testExample() {
+		var result = example.test("world");
+		test.isequal("hello world", result);
+	}

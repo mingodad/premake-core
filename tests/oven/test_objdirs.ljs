@@ -1,0 +1,84 @@
+//-
+// tests/oven/test_objdirs.ljs
+// Test the per-configuration object directory assignments.
+// Copyright (c) 2014-2015 Jason Perkins and the Premake project
+//-
+
+	var p = premake;
+	var suite = test.declare("oven_objdirs");
+	var oven = p.oven;
+
+//-
+// Setup
+//-
+
+	var wks, prj;
+
+	function suite.setup() {
+		wks = workspace("MyWorkspace");
+		configurations ({ "Debug", "Release" });
+		prj = project ("MyProject");
+	}
+
+	var function prepare(buildcfg, platform) {
+		cfg = test.getconfig(prj, buildcfg, platform);
+	}
+
+	function suite.singleProject_noPlatforms() {
+		prepare("Debug");
+		test.isequal(path.getabsolute("obj/Debug"), cfg.objdir);
+
+		prepare("Release");
+		test.isequal(path.getabsolute("obj/Release"), cfg.objdir);
+	}
+
+
+	function suite.multipleProjects_noPlatforms() {
+		project ("MyProject2");
+		prepare("Debug");
+
+		test.createproject(wks);
+		test.isequal(path.getabsolute("obj/Debug/MyProject"), cfg.objdir);
+	}
+
+
+	function suite.singleProject_withPlatforms() {
+		platforms ({ "x86", "x86_64" });
+		prepare("Debug", "x86");
+
+		test.isequal(path.getabsolute("obj/x86/Debug"), cfg.objdir);
+	}
+
+
+	function suite.singleProject_uniqueByTokens_noPlatforms() {
+		objdir ("obj/%{cfg.buildcfg}");
+		prepare("Debug");
+
+		test.isequal(path.getabsolute("obj/Debug"), cfg.objdir);
+	}
+
+
+	function suite.singleProject_uniqueByTokens_withPlatforms() {
+		platforms ({ "x86", "x86_64" });
+		objdir ("obj/%{cfg.buildcfg}_%{cfg.platform}");
+		prepare("Debug", "x86");
+
+		test.isequal(path.getabsolute("obj/Debug_x86"), cfg.objdir);
+	}
+
+
+	function suite.allowOverlap_onPrefixCode() {
+		platforms ({ "x86", "x86_64" });
+		objdir ("!obj/%{cfg.buildcfg}");
+		prepare("Debug", "x86");
+
+		test.isequal(path.getabsolute("obj/Debug"), cfg.objdir);
+	}
+
+	function suite.allowOverlap_onPrefixCode_withEnvironmentVariable() {
+		platforms ({ "x86", "x86_64" });
+		objdir ("!$(SolutionDir)/%{cfg.buildcfg}");
+		prepare("Debug", "x86");
+
+		test.isequal("$(SolutionDir)/Debug", cfg.objdir);
+	}

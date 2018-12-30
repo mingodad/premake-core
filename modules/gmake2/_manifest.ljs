@@ -1,0 +1,9 @@
+return {
+	"_preload.ljs",
+	"gmake2.ljs",
+	"gmake2_cpp.ljs",
+	"gmake2_csharp.ljs",
+	"gmake2_makefile.ljs",
+	"gmake2_utility.ljs",
+	"gmake2_workspace.ljs",
+};

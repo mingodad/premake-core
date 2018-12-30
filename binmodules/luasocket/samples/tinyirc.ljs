@@ -1,0 +1,89 @@
+//---------------------------------------------------------------------------
+// Select sample: simple text line server
+// LuaSocket sample files.
+// Author: Diego Nehab
+//---------------------------------------------------------------------------
+var socket = require("socket");
+host = host || "*";
+port1 = port1 || 8080;
+port2 = port2 || 8181;
+if( arg ) {
+    host = arg[1] || host;
+    port1 = arg[2] || port1;
+    port2 = arg[3] || port2;
+}
+
+server1 = assert(socket.bind(host, port1));
+server2 = assert(socket.bind(host, port2));
+server1->settimeout(1); // make sure we don't block in accept
+server2->settimeout(1);
+
+io.write("Servers bound\n");
+
+// simple set implementation
+// the select function doesn't care about what is passed to it as long as
+// it behaves like a table
+// creates a new set data structure
+function newset() {
+    var reverse = {};
+    var set = {};
+    return setmetatable(set, {__index = {
+        insert = function(set, value) {
+            if( ! reverse[value] ) {
+                table.insert(set, value);
+                reverse[value] = #set;
+            }
+        },
+        remove = function(set, value) {
+            var index = reverse[value];
+            if( index ) {
+                reverse[value] = null;
+                var top = table.remove(set);
+                if( top != value ) {
+                    reverse[top] = index;
+                    set[index] = top;
+                }
+            }
+        }
+    }});
+}
+
+set = newset();
+
+io.write("Inserting servers in set\n");
+set->insert(server1);
+set->insert(server2);
+
+while( 1 ) {
+    var readable, _, error = socket.select(set, null);
+    for( _, input in ipairs(readable) ) {
+        // is it a server socket?
+        if( input == server1 || input == server2 ) {
+            io.write("Waiting for clients\n");
+            var new = input->accept();
+            if( new ) {
+                new->settimeout(1);
+                io.write("Inserting client in set\n");
+                set->insert(new);
+            }
+        // it is a client socket
+        } else {
+            var line, xerror = input->receive();
+            if( xerror ) {
+                input->close();
+                io.write("Removing client from set\n");
+                set->remove(input);
+            } else {
+            	io.write("Broadcasting line '", line, "'\n");
+            	writable, error = socket.skip(1, socket.select(null, set, 1));
+            	if( ! error ) {
+                	for( __, output in ipairs(writable) ) {
+                    	if( output != input ) {
+                            output->send(line .. "\n");
+                        }
+                	}
+            	} else { io.write("No client ready to receive!!!\n"); }
+			}
+        }
+    }
+}

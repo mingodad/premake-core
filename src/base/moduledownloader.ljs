@@ -1,0 +1,67 @@
+//
+// moduledownloader.ljs
+// Downloads a module from a package server
+// Copyright (c) 2002-2017 Jason Perkins and the Premake project
+//
+
+//-
+// Downloads a module from a package server
+//
+// @param modname
+//    The name of the module to download.
+// @param versions
+//    An optional version criteria string; see premake.checkVersion()
+//    for more information on the format.
+// @return
+//    If successful, the module was downloaded into the .modules folder.
+//-
+
+	function premake.downloadModule(modname, versions) {
+		if( http == null ) {
+			return false;
+		}
+
+		// get current user.
+		var user = 'UNKNOWN';
+		if( os.ishost('windows') ) {
+			user = os.getenv('USERNAME') || user;
+		} else {
+			user = os.getenv('LOGNAME') || user;
+		}
+
+		// what server to ask?
+		var server = package.server || 'http://packagesrv.com';
+
+		// get the link to the module?
+		var url = 'api/v1/module/' .. http.escapeUrlParam(modname);
+		if( versions ) {
+			url = url .. '/' .. http.escapeUrlParam(versions);
+		}
+		var content, result_str, response_code = http.get(server .. '/' .. url);
+		if( content ) {
+			url = content;
+		} else {
+			// no content, module doesn't exist.
+			return false;
+		}
+
+		// Download the module.
+		var location = '.modules/' .. modname;
+		var destination = location .. '/temp.zip';
+
+		os.mkdir(location);
+		result_str, response_code = http.download(url, destination, {
+			headers  = {'X-Premake-User: ' .. user},
+			progress = (_OPTIONS.verbose ? http.reportProgress : null)
+		});
+
+		if( result_str != 'OK' ) {
+			premake.error('Download of %s failed (%d)\n%s', url, response_code, result_str);
+		}
+
+		// Unzip the module, and delete the temporary zip file.
+		verbosef(' UNZIP   : %s', destination);
+		zip.extract(destination, location);
+		os.remove(destination);
+		return true;
+	}

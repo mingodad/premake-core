@@ -1,0 +1,65 @@
+//
+// tests/actions/make/cs/test_flags.ljs
+// Tests compiler and linker flags for C# Makefiles.
+// Copyright (c) 2013 Jason Perkins and the Premake project
+//
+
+	var p = premake;
+	var suite = test.declare("make_cs_flags");
+	var make = p.make;
+	var cs = p.make.cs;
+	var project = p.project;
+
+
+//
+// Setup
+//
+
+	var wks, prj;
+
+	function suite.setup() {
+		wks, prj = test.createWorkspace();
+	}
+
+	var function prepare() {
+		var cfg = test.getconfig(prj, "Debug");
+		make.csFlags(cfg, p.tools.dotnet);
+	}
+
+
+//
+// Should return an empty assignment if nothing has been specified.
+//
+
+	function suite.isEmptyAssignment_onNoSettings() {
+		prepare();
+		test.capture ([=[
+  FLAGS = /noconfig
+		]=]);
+	}
+
+
+//
+// If the Unsafe flag has been set, it should be specified.
+//
+
+	function suite.onUnsafe() {
+		clr ("Unsafe");
+		prepare();
+		test.capture ([=[
+  FLAGS = /unsafe /noconfig
+		]=]);
+	}
+
+
+//
+// If an application icon has been set, it should be specified.
+//
+
+	function suite.onApplicationIcon() {
+		icon ("MyProject.ico");
+		prepare();
+		test.capture ([=[
+  FLAGS = /noconfig /win32icon:"MyProject.ico"
+		]=]);
+	}
